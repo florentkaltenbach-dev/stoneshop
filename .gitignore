@@ -8,7 +8,7 @@ backups/
 web/app/uploads/
 web/app/languages/
 product-photos/
-*.sql
+backups/**/*.sql
 
 # Composer vendor (rebuilt in Docker)
 vendor/

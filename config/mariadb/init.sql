@@ -1,0 +1,5 @@
+-- Create Matomo database and user
+CREATE DATABASE IF NOT EXISTS matomo CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER IF NOT EXISTS 'matomo'@'%' IDENTIFIED BY '__MATOMO_DB_PASSWORD__';
+GRANT ALL PRIVILEGES ON matomo.* TO 'matomo'@'%';
+FLUSH PRIVILEGES;
