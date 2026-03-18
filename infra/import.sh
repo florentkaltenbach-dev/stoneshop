@@ -2,9 +2,19 @@
 # StoneShop Data Import — Phase 3
 # Restores data from Restic backups and runs search-replace if domain changed.
 # Run as root after setup.sh has the stack running.
-# Usage: sudo bash import.sh
+# Usage: sudo bash import.sh [--skip-restore]
+#
+# --skip-restore  Skip restic restore, only run search-replace + fixups
+#                 (useful when data was already restored in a previous run)
 
 set -Eeuo pipefail
+
+SKIP_RESTORE=false
+for arg in "$@"; do
+    case "$arg" in
+        --skip-restore) SKIP_RESTORE=true ;;
+    esac
+done
 
 if [ "$(id -u)" -ne 0 ]; then
     echo "ERROR: Must run as root" >&2
@@ -85,72 +95,82 @@ if [ $ELAPSED -ge $TIMEOUT ]; then
     exit 1
 fi
 
-# ── Restore Uploads ───────────────────────────────────────
-echo "Restoring uploads from Restic..."
-RESTORE_TMP=$(make_tmp)
-run_restic --retry-lock 5m restore latest --tag uploads --target "$RESTORE_TMP"
-
-if [ -d "$RESTORE_TMP/backups/uploads" ]; then
-    rsync -a --delete "$RESTORE_TMP/backups/uploads/" "$INSTALL_DIR/web/app/uploads/"
-    echo "Uploads restored."
+if [ "$SKIP_RESTORE" = true ]; then
+    echo "Skipping data restore (--skip-restore)."
 else
-    echo "WARNING: No uploads directory found in snapshot." >&2
+    # ── Restore Uploads ───────────────────────────────────────
+    echo "Restoring uploads from Restic..."
+    RESTORE_TMP=$(make_tmp)
+    run_restic --retry-lock 5m restore latest --tag uploads --target "$RESTORE_TMP"
+
+    if [ -d "$RESTORE_TMP/backups/uploads" ]; then
+        rsync -a --delete "$RESTORE_TMP/backups/uploads/" "$INSTALL_DIR/web/app/uploads/"
+        echo "Uploads restored."
+    else
+        echo "WARNING: No uploads directory found in snapshot." >&2
+    fi
+
+    # ── Restore Languages ────────────────────────────────────
+    echo "Restoring languages from Restic..."
+    LANG_TMP=$(make_tmp)
+    run_restic --retry-lock 5m restore latest --tag languages --target "$LANG_TMP" 2>/dev/null || true
+
+    if [ -d "$LANG_TMP/backups/languages" ]; then
+        rsync -a --delete "$LANG_TMP/backups/languages/" "$INSTALL_DIR/web/app/languages/"
+        echo "Languages restored."
+    else
+        echo "INFO: No languages snapshot found (may not exist yet). Skipping."
+    fi
+
+    # ── Restore Database ─────────────────────────────────────
+    echo "Restoring database from Restic..."
+    DB_TMP=$(make_tmp)
+    run_restic --retry-lock 5m restore latest --tag db --target "$DB_TMP"
+
+    if [ -f "$DB_TMP/backups/db/stoneshop.sql" ]; then
+        echo "Importing stoneshop database..."
+        docker exec -i "$DB_CONTAINER" mariadb -u root -p"$MYSQL_ROOT_PASSWORD" stoneshop \
+            < "$DB_TMP/backups/db/stoneshop.sql"
+        echo "WordPress database imported."
+    else
+        echo "ERROR: stoneshop.sql not found in snapshot." >&2
+        exit 1
+    fi
+
+    if [ -f "$DB_TMP/backups/db/matomo.sql" ]; then
+        echo "Importing matomo database..."
+        docker exec -i "$DB_CONTAINER" mariadb -u root -p"$MYSQL_ROOT_PASSWORD" matomo \
+            < "$DB_TMP/backups/db/matomo.sql"
+        echo "Matomo database imported."
+    else
+        echo "WARNING: matomo.sql not found in snapshot." >&2
+    fi
+
+    # ── Restore Matomo Data Volume ───────────────────────────
+    echo "Restoring Matomo data volume from Restic..."
+    MATOMO_TMP=$(make_tmp)
+    run_restic --retry-lock 5m restore latest --tag matomo --target "$MATOMO_TMP" 2>/dev/null || true
+
+    if [ -d "$MATOMO_TMP/backups/matomo" ]; then
+        docker cp "$MATOMO_TMP/backups/matomo/." stoneshop_matomo:/var/www/html/
+        docker exec stoneshop_matomo chown -R www-data:www-data /var/www/html
+        echo "Matomo data volume restored."
+    else
+        echo "INFO: No matomo data snapshot found. Skipping."
+    fi
+
+    # ── Fix Ownership ─────────────────────────────────────────
+    echo "Fixing file ownership..."
+    chown -R 33:1100 "$INSTALL_DIR/web/app/uploads" "$INSTALL_DIR/web/app/languages"
+    chmod -R g+w "$INSTALL_DIR/web/app/uploads" "$INSTALL_DIR/web/app/languages"
+
+    # ── Cleanup ───────────────────────────────────────────────
+    rm -rf "${RESTORE_TMP:-}" "${LANG_TMP:-}" "${DB_TMP:-}" "${MATOMO_TMP:-}"
+
+    # Mark restore complete so re-runs can skip it
+    touch "$INSTALL_DIR/.restore-done"
+    echo "Data restore complete."
 fi
-
-# ── Restore Languages ────────────────────────────────────
-echo "Restoring languages from Restic..."
-LANG_TMP=$(make_tmp)
-run_restic --retry-lock 5m restore latest --tag languages --target "$LANG_TMP" 2>/dev/null || true
-
-if [ -d "$LANG_TMP/backups/languages" ]; then
-    rsync -a --delete "$LANG_TMP/backups/languages/" "$INSTALL_DIR/web/app/languages/"
-    echo "Languages restored."
-else
-    echo "INFO: No languages snapshot found (may not exist yet). Skipping."
-fi
-
-# ── Restore Database ─────────────────────────────────────
-echo "Restoring database from Restic..."
-DB_TMP=$(make_tmp)
-run_restic --retry-lock 5m restore latest --tag db --target "$DB_TMP"
-
-if [ -f "$DB_TMP/backups/db/stoneshop.sql" ]; then
-    echo "Importing stoneshop database..."
-    docker exec -i "$DB_CONTAINER" mariadb -u root -p"$MYSQL_ROOT_PASSWORD" stoneshop \
-        < "$DB_TMP/backups/db/stoneshop.sql"
-    echo "WordPress database imported."
-else
-    echo "ERROR: stoneshop.sql not found in snapshot." >&2
-    exit 1
-fi
-
-if [ -f "$DB_TMP/backups/db/matomo.sql" ]; then
-    echo "Importing matomo database..."
-    docker exec -i "$DB_CONTAINER" mariadb -u root -p"$MYSQL_ROOT_PASSWORD" matomo \
-        < "$DB_TMP/backups/db/matomo.sql"
-    echo "Matomo database imported."
-else
-    echo "WARNING: matomo.sql not found in snapshot." >&2
-fi
-
-# ── Restore Matomo Data Volume ───────────────────────────
-echo "Restoring Matomo data volume from Restic..."
-MATOMO_TMP=$(make_tmp)
-run_restic --retry-lock 5m restore latest --tag matomo --target "$MATOMO_TMP" 2>/dev/null || true
-
-if [ -d "$MATOMO_TMP/backups/matomo" ]; then
-    # Copy into the matomo_data volume via the matomo container
-    docker cp "$MATOMO_TMP/backups/matomo/." stoneshop_matomo:/var/www/html/
-    docker exec stoneshop_matomo chown -R www-data:www-data /var/www/html
-    echo "Matomo data volume restored."
-else
-    echo "INFO: No matomo data snapshot found. Skipping."
-fi
-
-# ── Fix Ownership ─────────────────────────────────────────
-echo "Fixing file ownership..."
-chown -R 33:1100 "$INSTALL_DIR/web/app/uploads" "$INSTALL_DIR/web/app/languages"
-chmod -R g+w "$INSTALL_DIR/web/app/uploads" "$INSTALL_DIR/web/app/languages"
 
 # ── Domain Search-Replace ─────────────────────────────────
 if [ -n "${OLD_DOMAIN:-}" ] && [ -n "${SITE_DOMAIN:-}" ] && [ "$OLD_DOMAIN" != "$SITE_DOMAIN" ]; then
@@ -180,9 +200,6 @@ SQLEOF
 echo "Flushing caches..."
 docker exec "$CONTAINER" wp --path=/app/web/wp cache flush 2>/dev/null || true
 docker exec stoneshop_keydb keydb-cli FLUSHALL 2>/dev/null || true
-
-# ── Cleanup ───────────────────────────────────────────────
-rm -rf "$RESTORE_TMP" "$LANG_TMP" "$DB_TMP" "$MATOMO_TMP"
 
 # ── Final Healthcheck ─────────────────────────────────────
 echo "Running final healthcheck..."

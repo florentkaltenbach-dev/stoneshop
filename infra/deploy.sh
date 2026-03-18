@@ -313,7 +313,14 @@ if phase_done "import"; then
 elif [ -f "$BACKUP_KEY" ]; then
     echo ""
     echo "=== Phase 3: Data Import ==="
-    run_remote_cmd deploy "Phase 3: Import" "cd /opt/stoneshop && git pull && sudo bash infra/import.sh"
+    # If data was already restored (marker on server), skip the slow 6GB download
+    IMPORT_FLAGS=""
+    # shellcheck disable=SC2086
+    if ssh $SSH_RUN "deploy@${SERVER_IP}" "test -f /opt/stoneshop/.restore-done" 2>/dev/null; then
+        IMPORT_FLAGS="--skip-restore"
+        echo "Data already restored — running search-replace only."
+    fi
+    run_remote_cmd deploy "Phase 3: Import" "cd /opt/stoneshop && git pull && sudo bash infra/import.sh $IMPORT_FLAGS"
     mark_done "import"
 else
     echo ""
