@@ -2,6 +2,9 @@
 config.env
 .env
 
+# Deploy state (local to your machine)
+.deploy-state
+
 # Runtime data
 logs/
 backups/
