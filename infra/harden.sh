@@ -53,7 +53,15 @@ sudo -u deploy mkdir -p /home/deploy/.ssh
 chmod 700 /home/deploy/.ssh
 chown deploy:deploy /home/deploy/.ssh
 
-echo "NOTE: Add your SSH public key to /home/deploy/.ssh/authorized_keys"
+# Copy SSH keys from root if available, otherwise prompt
+if [ -f /root/.ssh/authorized_keys ]; then
+    cp /root/.ssh/authorized_keys /home/deploy/.ssh/authorized_keys
+    chown deploy:deploy /home/deploy/.ssh/authorized_keys
+    chmod 600 /home/deploy/.ssh/authorized_keys
+    echo "Copied SSH authorized_keys from root to deploy."
+else
+    echo "NOTE: No root SSH keys found. Add your SSH public key to /home/deploy/.ssh/authorized_keys"
+fi
 
 systemctl restart ssh
 
