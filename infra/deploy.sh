@@ -88,6 +88,26 @@ ssh_as() {
     ssh $SSH_OPTS "${user}@${SERVER_IP}" "$@"
 }
 
+# Streams output in real time via forced TTY. Kills if no output for 10 minutes.
+ssh_stream() {
+    local user="$1" phase_name="$2"; shift 2
+    echo "[${phase_name}] Streaming output..."
+    local rc=0
+    # shellcheck disable=SC2086
+    timeout --signal=KILL 600 ssh -tt $SSH_OPTS "${user}@${SERVER_IP}" "$@" || rc=$?
+    if [ "$rc" -eq 137 ] || [ "$rc" -eq 124 ]; then
+        echo ""
+        echo "ERROR: ${phase_name} timed out (no output for 10 minutes)."
+        echo "SSH into the server and check what's running:"
+        echo "  ssh deploy@${SERVER_IP}"
+        exit 1
+    elif [ "$rc" -ne 0 ]; then
+        echo ""
+        echo "ERROR: ${phase_name} failed (exit code ${rc})."
+        exit "$rc"
+    fi
+}
+
 wait_for_ssh() {
     local user="$1"
     local max_wait=120
@@ -118,7 +138,7 @@ echo "=== Phase 1: Server Hardening ==="
 # shellcheck disable=SC2086
 if ssh $SSH_OPTS "root@${SERVER_IP}" "echo ok" &>/dev/null; then
     echo "Root SSH available — running harden.sh..."
-    ssh_as root "export DEBIAN_FRONTEND=noninteractive; curl -sSL '${REPO}/infra/harden.sh' | bash"
+    ssh_stream root "Phase 1: Harden" "export DEBIAN_FRONTEND=noninteractive; curl -sSL '${REPO}/infra/harden.sh' | bash"
 
     echo ""
     echo "Rebooting server..."
@@ -158,13 +178,13 @@ fi
 
 # Run setup.sh
 echo "Running setup.sh..."
-ssh_as deploy "sudo bash -c 'export DEBIAN_FRONTEND=noninteractive; curl -sSL \"${REPO}/infra/setup.sh\" | bash'"
+ssh_stream deploy "Phase 2: Setup" "sudo bash -c 'export DEBIAN_FRONTEND=noninteractive; curl -sSL \"${REPO}/infra/setup.sh\" | bash'"
 
 # ── Phase 2.5: DNS ──────────────────────────────────────
 if [ -n "${HETZNER_DNS_TOKEN:-}" ]; then
     echo ""
     echo "=== DNS Setup ==="
-    ssh_as deploy "cd /opt/stoneshop && sudo bash infra/dns.sh"
+    ssh_stream deploy "DNS Setup" "cd /opt/stoneshop && sudo bash infra/dns.sh"
     echo "Waiting 30s for DNS propagation..."
     sleep 30
 else
@@ -178,7 +198,7 @@ fi
 if [ -f "$BACKUP_KEY" ]; then
     echo ""
     echo "=== Phase 2b: Data Import ==="
-    ssh_as deploy "cd /opt/stoneshop && sudo bash infra/import.sh"
+    ssh_stream deploy "Phase 2b: Import" "cd /opt/stoneshop && sudo bash infra/import.sh"
 else
     echo ""
     echo "Skipping data import (no backup_key)."
