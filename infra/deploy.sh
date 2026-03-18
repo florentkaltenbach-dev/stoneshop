@@ -137,7 +137,6 @@ if [ ! -f "$CONFIG_FILE" ]; then
     echo "  SITE_DOMAIN       — your actual domain"
     echo "  TLS_EMAIL         — your email for Let's Encrypt"
     echo "  OLD_DOMAIN        — previous domain (for migration)"
-    echo "  HETZNER_DNS_TOKEN — for automatic DNS setup (optional)"
     echo ""
     read -r -p "Press Enter when ready (or Ctrl+C to abort)..."
 
@@ -306,23 +305,6 @@ else
     # Run setup.sh
     run_script deploy "Phase 2: Setup" "${SCRIPT_DIR}/setup.sh" "sudo DEBIAN_FRONTEND=noninteractive"
     mark_done "setup"
-fi
-
-# ── Phase 2.5: DNS ──────────────────────────────────────
-if phase_done "dns"; then
-    echo "=== DNS Setup — already done, skipping ==="
-elif [ -n "${HETZNER_DNS_TOKEN:-}" ]; then
-    echo ""
-    echo "=== DNS Setup ==="
-    run_remote_cmd deploy "DNS Setup" "cd /opt/stoneshop && sudo bash infra/dns.sh"
-    echo "Waiting 20s for DNS propagation..."
-    sleep 20
-    mark_done "dns"
-else
-    echo ""
-    echo "Skipping DNS (no HETZNER_DNS_TOKEN). Create A records manually:"
-    echo "  ${SITE_DOMAIN} → ${SERVER_IP}"
-    echo "  matomo.${SITE_DOMAIN} → ${SERVER_IP}"
 fi
 
 # ── Phase 3: Import ───────────────────────────────────
