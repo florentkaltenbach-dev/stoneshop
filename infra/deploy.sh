@@ -14,8 +14,27 @@ CONFIG_FILE="${SCRIPT_DIR}/config.env"
 BACKUP_KEY="${SCRIPT_DIR}/backup_key"
 
 # ── Parse arguments ─────────────────────────────────────
-if [ $# -lt 1 ]; then
-    echo "Usage: ./deploy.sh <server-ip>"
+FRESH=false
+for arg in "$@"; do
+    case "$arg" in
+        --fresh) FRESH=true ;;
+    esac
+done
+
+# Strip flags to get positional args
+POSITIONAL=()
+for arg in "$@"; do
+    case "$arg" in
+        --fresh) ;;
+        *) POSITIONAL+=("$arg") ;;
+    esac
+done
+
+if [ ${#POSITIONAL[@]} -lt 1 ]; then
+    echo "Usage: ./deploy.sh [--fresh] <server-ip>"
+    echo ""
+    echo "Options:"
+    echo "  --fresh     Clear known_hosts for this IP (use after server rebuild)"
     echo ""
     echo "Optional files (place next to deploy.sh):"
     echo "  config.env  — site config + secrets (generated if missing)"
@@ -23,11 +42,13 @@ if [ $# -lt 1 ]; then
     exit 1
 fi
 
-SERVER_IP="$1"
+SERVER_IP="${POSITIONAL[0]}"
 SERVER_IP="${SERVER_IP#*@}"
 
-# Fresh server = fresh host key. Clear stale known_hosts entries.
-ssh-keygen -R "$SERVER_IP" 2>/dev/null || true
+if [ "$FRESH" = true ]; then
+    echo "Clearing known_hosts for ${SERVER_IP} (--fresh)..."
+    ssh-keygen -R "$SERVER_IP" 2>/dev/null || true
+fi
 
 # ── Detect SSH key ────────────────────────────────────────
 SSH_KEY=""
