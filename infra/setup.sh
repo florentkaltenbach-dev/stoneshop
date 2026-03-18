@@ -90,15 +90,16 @@ chmod 2775 "$INSTALL_DIR/web/app/uploads" "$INSTALL_DIR/web/app/languages"
 CONFIG_ENV="$INSTALL_DIR/config.env"
 if [ ! -f "$CONFIG_ENV" ]; then
     echo ""
-    echo "config.env not found. Please create it now."
-    echo "Template: ${INSTALL_DIR}/config.env.example"
+    echo "No config.env found — launching interactive configuration wizard..."
     echo ""
-    read -r -p "Press Enter after you've created ${CONFIG_ENV}, or Ctrl-C to abort..."
+    bash "$INSTALL_DIR/infra/configure.sh" "$INSTALL_DIR"
 
     if [ ! -f "$CONFIG_ENV" ]; then
-        echo "ERROR: ${CONFIG_ENV} still not found." >&2
+        echo "ERROR: ${CONFIG_ENV} still not found after configure." >&2
         exit 1
     fi
+else
+    echo "Existing config.env found, using it."
 fi
 
 chmod 0600 "$CONFIG_ENV"
