@@ -61,6 +61,8 @@ fi
 
 # ── Clone Repository ─────────────────────────────────────
 echo "Cloning repository to ${INSTALL_DIR}..."
+mkdir -p "$INSTALL_DIR"
+chown deploy:project "$INSTALL_DIR"
 if [ -d "$INSTALL_DIR/.git" ]; then
     echo "Repository already exists at ${INSTALL_DIR}, pulling latest..."
     sudo -u deploy git -C "$INSTALL_DIR" pull
