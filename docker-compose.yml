@@ -1,0 +1,183 @@
+services:
+  mariadb:
+    image: mariadb:11.8
+    container_name: stoneshop_mariadb
+    restart: unless-stopped
+    env_file: ./config.env
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: stoneshop
+      MYSQL_USER: stoneshop
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    volumes:
+      - mariadb_data:/var/lib/mysql
+      - ./config/mariadb/custom.cnf:/etc/mysql/conf.d/custom.cnf:ro
+      - ./config/mariadb/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - backend
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2'
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  keydb:
+    image: eqalpha/keydb:latest
+    container_name: stoneshop_keydb
+    restart: unless-stopped
+    command: keydb-server --server-threads 2 --maxmemory 512mb --maxmemory-policy allkeys-lru
+    volumes:
+      - keydb_data:/data
+    networks:
+      - backend
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+    healthcheck:
+      test: ["CMD", "keydb-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  matomo:
+    image: matomo:latest
+    container_name: stoneshop_matomo
+    restart: unless-stopped
+    env_file: ./config.env
+    environment:
+      MATOMO_DATABASE_HOST: mariadb
+      MATOMO_DATABASE_ADAPTER: mysql
+      MATOMO_DATABASE_TABLES_PREFIX: matomo_
+      MATOMO_DATABASE_USERNAME: matomo
+      MATOMO_DATABASE_PASSWORD: ${MATOMO_DATABASE_PASSWORD}
+      MATOMO_DATABASE_DBNAME: matomo
+    volumes:
+      - matomo_data:/var/www/html
+    networks:
+      - frontend
+      - backend
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/matomo.php"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  crowdsec:
+    image: crowdsecurity/crowdsec:latest
+    container_name: stoneshop_crowdsec
+    restart: unless-stopped
+    environment:
+      COLLECTIONS: "crowdsecurity/caddy crowdsecurity/http-cve crowdsecurity/wordpress"
+    volumes:
+      - crowdsec_data:/var/lib/crowdsec/data
+      - ./logs:/var/log/caddy:ro
+    networks:
+      - frontend
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.5'
+
+  frankenphp:
+    build: .
+    container_name: stoneshop_frankenphp
+    restart: unless-stopped
+    user: "33:1100"
+    cap_add:
+      - NET_BIND_SERVICE
+    ports:
+      - "0.0.0.0:80:80"
+      - "0.0.0.0:443:443"
+      - "0.0.0.0:443:443/udp"
+    env_file: ./config.env
+    environment:
+      DB_NAME: stoneshop
+      DB_USER: stoneshop
+      DB_PASSWORD: ${MYSQL_PASSWORD}
+      DB_HOST: mariadb
+      WP_ENV: production
+      WP_HOME: https://${SITE_DOMAIN}
+      WP_SITEURL: https://${SITE_DOMAIN}/wp
+      WP_REDIS_HOST: keydb
+      WP_REDIS_PORT: 6379
+      SITE_DOMAIN: ${SITE_DOMAIN}
+      TLS_EMAIL: ${TLS_EMAIL}
+      SERVER_NAME: ${SITE_DOMAIN}
+      AUTH_KEY: ${AUTH_KEY}
+      SECURE_AUTH_KEY: ${SECURE_AUTH_KEY}
+      LOGGED_IN_KEY: ${LOGGED_IN_KEY}
+      NONCE_KEY: ${NONCE_KEY}
+      AUTH_SALT: ${AUTH_SALT}
+      SECURE_AUTH_SALT: ${SECURE_AUTH_SALT}
+      LOGGED_IN_SALT: ${LOGGED_IN_SALT}
+      NONCE_SALT: ${NONCE_SALT}
+    volumes:
+      - ./web/app/themes:/app/web/app/themes
+      - ./web/app/mu-plugins:/app/web/app/mu-plugins
+      - ./web/app/languages:/app/web/app/languages
+      - ./web/app/uploads:/app/web/app/uploads
+      - plugins:/app/web/app/plugins
+      - caddy_data:/data
+      - caddy_config:/config
+      - ./config/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./config/php/wordfence.ini:/usr/local/etc/php/conf.d/wordfence.ini:ro
+      - ./config/php/uploads.ini:/usr/local/etc/php/conf.d/uploads.ini:ro
+      - ./config/php/wordfence-waf.php:/app/web/wp/wordfence-waf.php:ro
+      - ./config/application.php:/app/config/application.php:ro
+      - ./logs:/var/log/caddy
+      - ./web/.well-known:/app/web/.well-known:ro
+    networks:
+      - frontend
+      - backend
+    depends_on:
+      mariadb:
+        condition: service_healthy
+      keydb:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 3G
+          cpus: '3'
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "curl", "-f", "-o", "/dev/null", "-s", "http://localhost/"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+
+networks:
+  frontend:
+    driver: bridge
+  backend:
+    driver: bridge
+    internal: true
+
+volumes:
+  mariadb_data:
+  keydb_data:
+  matomo_data:
+  crowdsec_data:
+  plugins:
+  caddy_data:
+  caddy_config:

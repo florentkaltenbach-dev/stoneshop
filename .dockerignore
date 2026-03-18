@@ -1,0 +1,28 @@
+# Large runtime data
+web/app/uploads/
+web/app/plugins/
+web/app/languages/
+logs/
+backups/
+product-photos/
+
+# Infrastructure scripts (not needed in image)
+infra/
+
+# Secrets
+config.env
+.env
+
+# Git
+.git/
+.gitignore
+
+# Documentation
+*.md
+docs/
+
+# Editor / OS
+.idea/
+.vscode/
+.DS_Store
+*.swp

@@ -1,0 +1,27 @@
+# Secrets
+config.env
+.env
+
+# Runtime data
+logs/
+backups/
+web/app/uploads/
+web/app/languages/
+product-photos/
+*.sql
+
+# Composer vendor (rebuilt in Docker)
+vendor/
+
+# WordPress core (installed by Composer)
+web/wp/
+
+# Plugins (installed by Composer into named volume)
+web/app/plugins/
+
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.bak

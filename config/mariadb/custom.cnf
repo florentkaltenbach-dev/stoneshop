@@ -1,0 +1,23 @@
+[mysqld]
+# InnoDB optimization for 2GB RAM limit
+innodb_buffer_pool_size = 1G
+innodb_log_file_size = 256M
+innodb_flush_log_at_trx_commit = 2
+innodb_flush_method = O_DIRECT
+
+# Connection settings
+max_connections = 100
+wait_timeout = 300
+
+# Query cache (deprecated in MySQL 8, but MariaDB still has it)
+query_cache_type = 1
+query_cache_size = 64M
+
+# Character set
+character-set-server = utf8mb4
+collation-server = utf8mb4_unicode_ci
+
+# Logging
+slow_query_log = 1
+slow_query_log_file = /var/lib/mysql/slow.log
+long_query_time = 2

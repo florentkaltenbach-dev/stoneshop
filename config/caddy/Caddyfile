@@ -1,0 +1,71 @@
+{
+    email {$TLS_EMAIL}
+    frankenphp
+    order php_server before file_server
+    servers {
+        trusted_proxies static private_ranges
+    }
+}
+
+{$SITE_DOMAIN} {
+    root * /app/web
+
+    # Security headers
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "SAMEORIGIN"
+        X-XSS-Protection "1; mode=block"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        Permissions-Policy "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), usb=()"
+        Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; style-src 'self' 'unsafe-inline' https:; img-src 'self' data: https:; connect-src 'self' https:; frame-src 'self' blob: https:; font-src 'self' https: data:; worker-src 'self' blob:; object-src 'none'; base-uri 'self';"
+        -Server
+    }
+
+    # Block sensitive paths (defense in depth)
+    @blocked path /.env* /composer.* /config/* /vendor/* /.git* /readme.html /license.txt /wp/readme.html /wp/license.txt /app/mu-plugins/* /app/upgrade/*
+    respond @blocked 404
+
+    # Ensure /wp?rest_route=... requests (Jetpack registration flow) hit WordPress front controller
+    @wp_rest_route {
+        path /wp
+        query rest_route=*
+    }
+    rewrite @wp_rest_route /wp/index.php
+
+    # Well-known directory
+    handle_path /.well-known/* {
+        root * /app/web/.well-known
+        file_server
+    }
+
+    # PHP handling - use encode for compression
+    encode zstd gzip
+
+    # PHP server
+    php_server
+
+    # Logging
+    log {
+        output file /var/log/caddy/access.log
+        format json
+    }
+}
+
+# Matomo subdomain
+matomo.{$SITE_DOMAIN} {
+    # Security headers
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "SAMEORIGIN"
+        X-XSS-Protection "1; mode=block"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; style-src 'self' 'unsafe-inline' https:; img-src 'self' data: https:; connect-src 'self' https:; frame-src 'self' blob: https:; font-src 'self' https: data:; object-src 'none'; base-uri 'self';"
+        -Server
+    }
+
+    reverse_proxy matomo:80 {
+        header_down -Content-Security-Policy
+    }
+}
