@@ -67,12 +67,22 @@ phase_done() {
 
 mark_done() {
     echo "$1" >> "$STATE_FILE"
-    echo "[state] $1 ✓"
+    echo ""
+    echo "  >>> checkpoint: $1 done <<<"
+    echo ""
+}
+
+last_checkpoint() {
+    if [ -f "$STATE_FILE" ]; then
+        tail -1 "$STATE_FILE"
+    else
+        echo "(none)"
+    fi
 }
 
 if [ -f "$STATE_FILE" ]; then
-    echo "Resuming deploy. Completed phases:"
-    sed 's/^/  /' "$STATE_FILE"
+    echo "Last checkpoint: $(last_checkpoint)"
+    echo "Completed: $(paste -sd', ' "$STATE_FILE")"
     echo ""
 fi
 
@@ -203,7 +213,7 @@ run_remote_cmd() {
 
 wait_for_ssh() {
     local user="$1"
-    local max_wait=120
+    local max_wait=20
     local waited=0
     echo "Waiting for SSH as ${user}@${SERVER_IP}..."
     while ! ssh_probe "$user" "echo ok" &>/dev/null; do
@@ -230,7 +240,7 @@ upload_file() {
 # ── Detect SSH user ──────────────────────────────────────
 echo "Waiting for SSH on ${SERVER_IP}..."
 READY_USER=""
-max_wait=120
+max_wait=20
 waited=0
 while [ -z "$READY_USER" ]; do
     if ssh_probe "deploy" "echo ok" &>/dev/null; then
@@ -260,7 +270,7 @@ elif [ "$READY_USER" = "root" ]; then
     echo ""
     echo "Rebooting server..."
     ssh_as root "reboot" || true
-    sleep 10
+    sleep 5
     wait_for_ssh "deploy"
     READY_USER="deploy"
 else
@@ -308,8 +318,8 @@ elif [ -n "${HETZNER_DNS_TOKEN:-}" ]; then
     echo ""
     echo "=== DNS Setup ==="
     run_remote_cmd deploy "DNS Setup" "cd /opt/stoneshop && sudo bash infra/dns.sh"
-    echo "Waiting 30s for DNS propagation..."
-    sleep 30
+    echo "Waiting 20s for DNS propagation..."
+    sleep 20
     mark_done "dns"
 else
     echo ""
