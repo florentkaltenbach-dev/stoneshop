@@ -26,6 +26,14 @@ set -a
 source "$CONFIG_ENV"
 set +a
 
+# Helper: create temp dir writable by deploy user
+make_tmp() {
+    local d
+    d=$(mktemp -d)
+    chmod 777 "$d"
+    echo "$d"
+}
+
 # Helper: run restic as deploy user with repo credentials
 # (sudo strips environment, so we pass vars explicitly)
 run_restic() {
@@ -82,7 +90,7 @@ fi
 
 # ── Restore Uploads ───────────────────────────────────────
 echo "Restoring uploads from Restic..."
-RESTORE_TMP=$(mktemp -d)
+RESTORE_TMP=$(make_tmp)
 run_restic --retry-lock 5m restore latest --tag uploads --target "$RESTORE_TMP"
 
 if [ -d "$RESTORE_TMP/backups/uploads" ]; then
@@ -94,7 +102,7 @@ fi
 
 # ── Restore Languages ────────────────────────────────────
 echo "Restoring languages from Restic..."
-LANG_TMP=$(mktemp -d)
+LANG_TMP=$(make_tmp)
 run_restic --retry-lock 5m restore latest --tag languages --target "$LANG_TMP" 2>/dev/null || true
 
 if [ -d "$LANG_TMP/backups/languages" ]; then
@@ -106,7 +114,7 @@ fi
 
 # ── Restore Database ─────────────────────────────────────
 echo "Restoring database from Restic..."
-DB_TMP=$(mktemp -d)
+DB_TMP=$(make_tmp)
 run_restic --retry-lock 5m restore latest --tag db --target "$DB_TMP"
 
 if [ -f "$DB_TMP/backups/db/stoneshop.sql" ]; then
@@ -130,7 +138,7 @@ fi
 
 # ── Restore Matomo Data Volume ───────────────────────────
 echo "Restoring Matomo data volume from Restic..."
-MATOMO_TMP=$(mktemp -d)
+MATOMO_TMP=$(make_tmp)
 run_restic --retry-lock 5m restore latest --tag matomo --target "$MATOMO_TMP" 2>/dev/null || true
 
 if [ -d "$MATOMO_TMP/backups/matomo" ]; then
