@@ -313,7 +313,7 @@ if phase_done "import"; then
 elif [ -f "$BACKUP_KEY" ]; then
     echo ""
     echo "=== Phase 3: Data Import ==="
-    run_remote_cmd deploy "Phase 3: Import" "cd /opt/stoneshop && sudo bash infra/import.sh"
+    run_remote_cmd deploy "Phase 3: Import" "cd /opt/stoneshop && git pull && sudo bash infra/import.sh"
     mark_done "import"
 else
     echo ""
