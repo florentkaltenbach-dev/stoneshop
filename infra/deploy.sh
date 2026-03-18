@@ -26,6 +26,9 @@ fi
 SERVER_IP="$1"
 SERVER_IP="${SERVER_IP#*@}"
 
+# Fresh server = fresh host key. Clear stale known_hosts entries.
+ssh-keygen -R "$SERVER_IP" 2>/dev/null || true
+
 # ── Detect SSH key ────────────────────────────────────────
 SSH_KEY=""
 for candidate in "${SCRIPT_DIR}/id_ed25519_hetzner" \
