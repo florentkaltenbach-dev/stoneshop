@@ -55,7 +55,7 @@ chown deploy:deploy /home/deploy/.ssh
 
 echo "NOTE: Add your SSH public key to /home/deploy/.ssh/authorized_keys"
 
-systemctl restart sshd
+systemctl restart ssh
 
 # ── UFW Firewall ──────────────────────────────────────────
 echo "Configuring UFW..."
