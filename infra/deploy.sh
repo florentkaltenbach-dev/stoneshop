@@ -291,23 +291,14 @@ else
     echo ""
     echo "=== Phase 2: Application Setup ==="
 
-    # Only wipe /opt/stoneshop if setup hasn't completed before
-    if ! ssh_as deploy "test -d /opt/stoneshop/.git" 2>/dev/null; then
-        echo "Preparing /opt/stoneshop..."
-        ssh_as deploy "sudo mkdir -p /opt/stoneshop && sudo chown deploy:project /opt/stoneshop"
-    else
-        echo "Repo already cloned at /opt/stoneshop, keeping it."
-    fi
-
-    # Upload config.env
+    # Upload config.env to /tmp staging area (setup.sh moves it after clone)
     echo "Uploading config.env..."
-    upload_file "$CONFIG_FILE" "/opt/stoneshop/config.env" deploy 600
+    upload_file "$CONFIG_FILE" "/tmp/stoneshop-config.env" deploy 600
 
     # Upload backup_key if present
     if [ -f "$BACKUP_KEY" ]; then
         echo "Uploading backup_key..."
-        ssh_as deploy "sudo mkdir -p /opt/stoneshop/config/backup"
-        upload_file "$BACKUP_KEY" "/opt/stoneshop/config/backup/backup_key" deploy 600
+        upload_file "$BACKUP_KEY" "/tmp/stoneshop-backup_key" deploy 600
     else
         echo "No backup_key found — skipping (import will be skipped too)."
     fi

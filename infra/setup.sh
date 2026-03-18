@@ -70,6 +70,17 @@ else
     sudo -u deploy git clone "$REPO_URL" "$INSTALL_DIR"
 fi
 
+# ── Move staged config files from /tmp ───────────────────
+if [ -f /tmp/stoneshop-config.env ]; then
+    mv /tmp/stoneshop-config.env "$INSTALL_DIR/config.env"
+    echo "Moved config.env into place."
+fi
+if [ -f /tmp/stoneshop-backup_key ]; then
+    mkdir -p "$INSTALL_DIR/config/backup"
+    mv /tmp/stoneshop-backup_key "$INSTALL_DIR/config/backup/backup_key"
+    echo "Moved backup_key into place."
+fi
+
 # ── Ownership & Permissions ──────────────────────────────
 echo "Setting ownership and permissions..."
 chown -R deploy:project "$INSTALL_DIR"
