@@ -53,6 +53,12 @@ SERVER_IP="${SERVER_IP#*@}"
 if [ "$FRESH" = true ]; then
     echo "Clearing known_hosts for ${SERVER_IP} (--fresh)..."
     ssh-keygen -R "$SERVER_IP" 2>/dev/null || true
+    echo "Accepting new host key for ${SERVER_IP}..."
+    for user in root deploy; do
+        ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 \
+            ${SSH_KEY:+-i "$SSH_KEY"} \
+            "${user}@${SERVER_IP}" "echo ok" < /dev/null 2>/dev/null && break
+    done || true
 fi
 
 if [ "$RESET" = true ]; then
@@ -98,7 +104,7 @@ for candidate in "${SCRIPT_DIR}/id_ed25519_hetzner" \
     fi
 done
 
-SSH_PROBE="-o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 -o BatchMode=yes"
+SSH_PROBE="-o StrictHostKeyChecking=accept-new -o ConnectTimeout=5"
 SSH_RUN="-o StrictHostKeyChecking=accept-new -o ConnectTimeout=10"
 if [ -n "$SSH_KEY" ]; then
     SSH_PROBE="${SSH_PROBE} -i ${SSH_KEY}"
@@ -162,7 +168,7 @@ echo ""
 ssh_probe() {
     local user="$1"; shift
     # shellcheck disable=SC2086
-    ssh $SSH_PROBE "${user}@${SERVER_IP}" "$@"
+    ssh $SSH_PROBE "${user}@${SERVER_IP}" "$@" < /dev/null
 }
 
 ssh_as() {
@@ -213,7 +219,7 @@ run_remote_cmd() {
 
 wait_for_ssh() {
     local user="$1"
-    local max_wait=20
+    local max_wait=30
     local waited=0
     echo "Waiting for SSH as ${user}@${SERVER_IP}..."
     while ! ssh_probe "$user" "echo ok" &>/dev/null; do
@@ -240,7 +246,7 @@ upload_file() {
 # ── Detect SSH user ──────────────────────────────────────
 echo "Waiting for SSH on ${SERVER_IP}..."
 READY_USER=""
-max_wait=20
+max_wait=30
 waited=0
 while [ -z "$READY_USER" ]; do
     if ssh_probe "deploy" "echo ok" &>/dev/null; then
