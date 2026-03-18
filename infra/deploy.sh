@@ -26,7 +26,23 @@ fi
 SERVER_IP="$1"
 SERVER_IP="${SERVER_IP#*@}"
 
+# ── Detect SSH key ────────────────────────────────────────
+SSH_KEY=""
+for candidate in "${SCRIPT_DIR}/id_ed25519_hetzner" \
+                 ~/.ssh/id_ed25519_hetzner \
+                 ~/.ssh/id_ed25519 \
+                 ~/.ssh/id_rsa; do
+    if [ -f "$candidate" ]; then
+        SSH_KEY="$candidate"
+        break
+    fi
+done
+
 SSH_OPTS="-o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 -o BatchMode=yes"
+if [ -n "$SSH_KEY" ]; then
+    SSH_OPTS="${SSH_OPTS} -i ${SSH_KEY}"
+    echo "Using SSH key: ${SSH_KEY}"
+fi
 
 # ── Ensure config.env exists ────────────────────────────
 if [ ! -f "$CONFIG_FILE" ]; then
@@ -128,7 +144,10 @@ wait_for_ssh() {
 
 upload_file() {
     local src="$1" dest="$2" mode="${3:-644}"
-    scp -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 "$src" "deploy@${SERVER_IP}:/tmp/_upload"
+    local scp_opts="-o StrictHostKeyChecking=accept-new -o ConnectTimeout=10"
+    [ -n "$SSH_KEY" ] && scp_opts="${scp_opts} -i ${SSH_KEY}"
+    # shellcheck disable=SC2086
+    scp $scp_opts "$src" "deploy@${SERVER_IP}:/tmp/_upload"
     ssh_as deploy "sudo mv /tmp/_upload ${dest} && sudo chmod ${mode} ${dest}"
 }
 
