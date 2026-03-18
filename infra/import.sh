@@ -26,12 +26,9 @@ set -a
 source "$CONFIG_ENV"
 set +a
 
-# Helper: create temp dir writable by deploy user
+# Helper: create temp dir owned by deploy user
 make_tmp() {
-    local d
-    d=$(mktemp -d)
-    chmod 777 "$d"
-    echo "$d"
+    sudo -u deploy mktemp -d
 }
 
 # Helper: run restic as deploy user with repo credentials
