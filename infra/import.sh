@@ -26,6 +26,15 @@ set -a
 source "$CONFIG_ENV"
 set +a
 
+# Helper: run restic as deploy user with repo credentials
+# (sudo strips environment, so we pass vars explicitly)
+run_restic() {
+    sudo -u deploy \
+        RESTIC_REPOSITORY="$RESTIC_REPOSITORY" \
+        RESTIC_PASSWORD="$RESTIC_PASSWORD" \
+        restic "$@"
+}
+
 echo "=== StoneShop Data Import ==="
 
 # ── Healthcheck Gate ──────────────────────────────────────
@@ -53,8 +62,7 @@ fi
 # ── Restore Uploads ───────────────────────────────────────
 echo "Restoring uploads from Restic..."
 RESTORE_TMP=$(mktemp -d)
-sudo -u deploy bash -c "export RESTIC_REPOSITORY RESTIC_PASSWORD; \
-    restic --retry-lock 5m restore latest --tag uploads --target '$RESTORE_TMP'"
+run_restic --retry-lock 5m restore latest --tag uploads --target "$RESTORE_TMP"
 
 if [ -d "$RESTORE_TMP/backups/uploads" ]; then
     rsync -a --delete "$RESTORE_TMP/backups/uploads/" "$INSTALL_DIR/web/app/uploads/"
@@ -66,8 +74,7 @@ fi
 # ── Restore Languages ────────────────────────────────────
 echo "Restoring languages from Restic..."
 LANG_TMP=$(mktemp -d)
-sudo -u deploy bash -c "export RESTIC_REPOSITORY RESTIC_PASSWORD; \
-    restic --retry-lock 5m restore latest --tag languages --target '$LANG_TMP'" 2>/dev/null || true
+run_restic --retry-lock 5m restore latest --tag languages --target "$LANG_TMP" 2>/dev/null || true
 
 if [ -d "$LANG_TMP/backups/languages" ]; then
     rsync -a --delete "$LANG_TMP/backups/languages/" "$INSTALL_DIR/web/app/languages/"
@@ -79,8 +86,7 @@ fi
 # ── Restore Database ─────────────────────────────────────
 echo "Restoring database from Restic..."
 DB_TMP=$(mktemp -d)
-sudo -u deploy bash -c "export RESTIC_REPOSITORY RESTIC_PASSWORD; \
-    restic --retry-lock 5m restore latest --tag db --target '$DB_TMP'"
+run_restic --retry-lock 5m restore latest --tag db --target "$DB_TMP"
 
 if [ -f "$DB_TMP/backups/db/stoneshop.sql" ]; then
     echo "Importing stoneshop database..."
@@ -104,8 +110,7 @@ fi
 # ── Restore Matomo Data Volume ───────────────────────────
 echo "Restoring Matomo data volume from Restic..."
 MATOMO_TMP=$(mktemp -d)
-sudo -u deploy bash -c "export RESTIC_REPOSITORY RESTIC_PASSWORD; \
-    restic --retry-lock 5m restore latest --tag matomo --target '$MATOMO_TMP'" 2>/dev/null || true
+run_restic --retry-lock 5m restore latest --tag matomo --target "$MATOMO_TMP" 2>/dev/null || true
 
 if [ -d "$MATOMO_TMP/backups/matomo" ]; then
     # Copy into the matomo_data volume via the matomo container

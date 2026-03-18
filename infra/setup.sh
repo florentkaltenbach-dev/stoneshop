@@ -134,7 +134,7 @@ fi
 
 # ── SSH config for StorageBox ─────────────────────────────
 echo "Setting up StorageBox SSH access..."
-BACKUP_KEY="$INSTALL_DIR/backup_key"
+BACKUP_KEY="$INSTALL_DIR/config/backup/backup_key"
 
 if [ ! -f "$BACKUP_KEY" ]; then
     echo ""
@@ -215,6 +215,7 @@ echo "Setting up cron jobs for deploy user..."
 
 # Remove existing stoneshop cron entries and add fresh ones
 CRON_TMP=$(mktemp)
+chmod 644 "$CRON_TMP"
 sudo -u deploy crontab -l 2>/dev/null | grep -v '/opt/stoneshop/' > "$CRON_TMP" || true
 cat >> "$CRON_TMP" <<'CRONEOF'
 # StoneShop: WordPress auto-update (04:00 daily)
