@@ -31,25 +31,20 @@ prompt() {
 
     if [ -n "$current" ]; then
         if [ "$secret" = "true" ]; then
-            echo "  ${label}: [keeping existing value]"
-            REPLY="$current"
-            return
-        else
-            local display="$current"
-            read -r -p "  ${label} [${display}]: " REPLY
+            # Show first 4 chars + masked rest so user knows what's there
+            local hint="${current:0:4}..."
+            read -r -p "  ${label} [${hint} — Enter to keep]: " REPLY
             REPLY="${REPLY:-$current}"
-            return
+        else
+            read -r -p "  ${label} [${current}]: " REPLY
+            REPLY="${REPLY:-$current}"
         fi
+        return
     fi
 
     if [ -n "$default" ]; then
-        if [ "$secret" = "true" ]; then
-            read -r -p "  ${label} [auto-generated]: " REPLY
-            REPLY="${REPLY:-$default}"
-        else
-            read -r -p "  ${label} [${default}]: " REPLY
-            REPLY="${REPLY:-$default}"
-        fi
+        read -r -p "  ${label} [${default}]: " REPLY
+        REPLY="${REPLY:-$default}"
     else
         read -r -p "  ${label}: " REPLY
     fi
