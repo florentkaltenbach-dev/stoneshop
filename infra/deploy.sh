@@ -8,8 +8,8 @@ set -euo pipefail
 #   config.env  — generated with defaults if missing, you edit before continuing
 #   backup_key  — StorageBox SSH key (import step skipped if missing)
 
-REPO="https://raw.githubusercontent.com/florentkaltenbach-dev/stoneshop/main"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 CONFIG_FILE="${SCRIPT_DIR}/config.env"
 BACKUP_KEY="${SCRIPT_DIR}/backup_key"
 
@@ -75,8 +75,8 @@ fi
 # ── Ensure config.env exists ────────────────────────────
 if [ ! -f "$CONFIG_FILE" ]; then
     echo "No config.env found next to deploy.sh."
-    echo "Downloading template and generating defaults..."
-    curl -sSL "${REPO}/config.env.example" -o "$CONFIG_FILE"
+    echo "Generating from template..."
+    cp "${REPO_DIR}/config.env.example" "$CONFIG_FILE"
 
     generate_password() { openssl rand -base64 24 | tr -d '/+=' | head -c 32; }
 
@@ -141,14 +141,17 @@ ssh_as() {
     ssh $SSH_RUN "${user}@${SERVER_IP}" "$@"
 }
 
-# Download a script to the server, then execute it (streams output live)
-run_remote_script() {
-    local user="$1" phase_name="$2" url="$3"
+# Upload a local script to the server, then execute it (streams output live)
+run_script() {
+    local user="$1" phase_name="$2" local_script="$3"
     shift 3
     local env_prefix="${*:-}"
 
-    echo "[${phase_name}] Downloading script..."
-    ssh_as "$user" "curl -sSL '${url}' -o /tmp/_phase_script.sh && chmod +x /tmp/_phase_script.sh"
+    echo "[${phase_name}] Uploading ${local_script}..."
+    local scp_opts="-o StrictHostKeyChecking=accept-new -o ConnectTimeout=10"
+    [ -n "$SSH_KEY" ] && scp_opts="${scp_opts} -i ${SSH_KEY}"
+    # shellcheck disable=SC2086
+    scp $scp_opts "$local_script" "${user}@${SERVER_IP}:/tmp/_phase_script.sh"
 
     echo "[${phase_name}] Running..."
     local rc=0
@@ -232,7 +235,7 @@ echo "=== Phase 1: Server Hardening ==="
 
 if [ "$READY_USER" = "root" ]; then
     echo "Root SSH available — running harden.sh..."
-    run_remote_script root "Phase 1: Harden" "${REPO}/infra/harden.sh" "export DEBIAN_FRONTEND=noninteractive;"
+    run_script root "Phase 1: Harden" "${SCRIPT_DIR}/harden.sh" "export DEBIAN_FRONTEND=noninteractive;"
 
     echo ""
     echo "Rebooting server..."
@@ -270,7 +273,7 @@ else
 fi
 
 # Run setup.sh
-run_remote_script deploy "Phase 2: Setup" "${REPO}/infra/setup.sh" "sudo DEBIAN_FRONTEND=noninteractive"
+run_script deploy "Phase 2: Setup" "${SCRIPT_DIR}/setup.sh" "sudo DEBIAN_FRONTEND=noninteractive"
 
 # ── Phase 2.5: DNS ──────────────────────────────────────
 if [ -n "${HETZNER_DNS_TOKEN:-}" ]; then
