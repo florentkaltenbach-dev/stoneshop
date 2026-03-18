@@ -2,10 +2,11 @@
 set -euo pipefail
 
 # StoneShop One-Click Deploy
-# Run from your laptop: ./deploy.sh root@<server-ip>
+# Run from your laptop: ./deploy.sh <server-ip>
 #
-# If config.env exists next to this script, it gets uploaded.
-# If not, a default is generated from config.env.example for you to edit.
+# Place next to this script (optional):
+#   config.env  — generated with defaults if missing, you edit before continuing
+#   backup_key  — StorageBox SSH key (import step skipped if missing)
 
 REPO="https://raw.githubusercontent.com/florentkaltenbach-dev/stoneshop/main"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -14,7 +15,7 @@ BACKUP_KEY="${SCRIPT_DIR}/backup_key"
 
 # ── Parse arguments ─────────────────────────────────────
 if [ $# -lt 1 ]; then
-    echo "Usage: ./deploy.sh root@<server-ip>"
+    echo "Usage: ./deploy.sh <server-ip>"
     echo ""
     echo "Optional files (place next to deploy.sh):"
     echo "  config.env  — site config + secrets (generated if missing)"
@@ -22,8 +23,10 @@ if [ $# -lt 1 ]; then
     exit 1
 fi
 
-TARGET="$1"
-SERVER_IP="${TARGET#*@}"
+SERVER_IP="$1"
+SERVER_IP="${SERVER_IP#*@}"
+
+SSH_OPTS="-o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 -o BatchMode=yes"
 
 # ── Ensure config.env exists ────────────────────────────
 if [ ! -f "$CONFIG_FILE" ]; then
@@ -31,16 +34,13 @@ if [ ! -f "$CONFIG_FILE" ]; then
     echo "Downloading template and generating defaults..."
     curl -sSL "${REPO}/config.env.example" -o "$CONFIG_FILE"
 
-    # Generate random passwords and salts
     generate_password() { openssl rand -base64 24 | tr -d '/+=' | head -c 32; }
 
-    # Replace placeholder passwords
     sed -i.bak "s/^MYSQL_ROOT_PASSWORD=changeme$/MYSQL_ROOT_PASSWORD=$(generate_password)/" "$CONFIG_FILE"
     sed -i.bak "s/^MYSQL_PASSWORD=changeme$/MYSQL_PASSWORD=$(generate_password)/" "$CONFIG_FILE"
     sed -i.bak "s/^MATOMO_DATABASE_PASSWORD=changeme$/MATOMO_DATABASE_PASSWORD=$(generate_password)/" "$CONFIG_FILE"
     sed -i.bak "s/^RESTIC_PASSWORD=changeme$/RESTIC_PASSWORD=$(generate_password)/" "$CONFIG_FILE"
 
-    # Generate WP salts
     for key in AUTH_KEY SECURE_AUTH_KEY LOGGED_IN_KEY NONCE_KEY AUTH_SALT SECURE_AUTH_SALT LOGGED_IN_SALT NONCE_SALT; do
         sed -i.bak "s/^${key}=$/${key}=$(openssl rand -base64 48 | tr -d '/+=' | head -c 64)/" "$CONFIG_FILE"
     done
@@ -52,14 +52,13 @@ if [ ! -f "$CONFIG_FILE" ]; then
     echo ""
     echo ">>> EDIT THIS FILE NOW <<<"
     echo "At minimum, set:"
-    echo "  SITE_DOMAIN    — your actual domain"
-    echo "  TLS_EMAIL      — your email for Let's Encrypt"
-    echo "  OLD_DOMAIN     — previous domain (for migration)"
-    echo "  HETZNER_DNS_TOKEN — if you want automatic DNS setup"
+    echo "  SITE_DOMAIN       — your actual domain"
+    echo "  TLS_EMAIL         — your email for Let's Encrypt"
+    echo "  OLD_DOMAIN        — previous domain (for migration)"
+    echo "  HETZNER_DNS_TOKEN — for automatic DNS setup (optional)"
     echo ""
     read -r -p "Press Enter when ready (or Ctrl+C to abort)..."
 
-    # Re-read in case they edited
     if grep -q "stoneshop.example.com" "$CONFIG_FILE"; then
         echo ""
         echo "WARNING: SITE_DOMAIN is still the default placeholder."
@@ -71,27 +70,31 @@ if [ ! -f "$CONFIG_FILE" ]; then
     fi
 fi
 
-echo ""
-echo "=== StoneShop Deploy ==="
-echo "Server:  ${SERVER_IP}"
-echo "Config:  ${CONFIG_FILE}"
-echo ""
-
-# Validate config.env has required fields
 source "$CONFIG_FILE"
 : "${SITE_DOMAIN:?SITE_DOMAIN not set in config.env}"
 : "${TLS_EMAIL:?TLS_EMAIL not set in config.env}"
 
-# ── Helper: SSH with common options ─────────────────────
-ssh_root() { ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 "root@${SERVER_IP}" "$@"; }
-ssh_deploy() { ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 "deploy@${SERVER_IP}" "$@"; }
+echo ""
+echo "=== StoneShop Deploy ==="
+echo "Server:  ${SERVER_IP}"
+echo "Domain:  ${SITE_DOMAIN}"
+echo "Config:  ${CONFIG_FILE}"
+echo ""
+
+# ── Helpers ─────────────────────────────────────────────
+ssh_as() {
+    local user="$1"; shift
+    # shellcheck disable=SC2086
+    ssh $SSH_OPTS "${user}@${SERVER_IP}" "$@"
+}
 
 wait_for_ssh() {
     local user="$1"
     local max_wait=120
     local waited=0
     echo "Waiting for SSH as ${user}@${SERVER_IP}..."
-    while ! ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 -o BatchMode=yes "${user}@${SERVER_IP}" "echo ok" &>/dev/null; do
+    # shellcheck disable=SC2086
+    while ! ssh $SSH_OPTS "${user}@${SERVER_IP}" "echo ok" &>/dev/null; do
         sleep 5
         waited=$((waited + 5))
         if [ $waited -ge $max_wait ]; then
@@ -103,50 +106,70 @@ wait_for_ssh() {
     echo "SSH ready."
 }
 
-# ── Phase 1: Harden ────────────────────────────────────
-echo ""
+upload_file() {
+    local src="$1" dest="$2" mode="${3:-644}"
+    scp -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 "$src" "deploy@${SERVER_IP}:/tmp/_upload"
+    ssh_as deploy "sudo mv /tmp/_upload ${dest} && sudo chmod ${mode} ${dest}"
+}
+
+# ── Phase 1: Harden (skip if already done) ──────────────
 echo "=== Phase 1: Server Hardening ==="
-ssh_root "curl -sSL '${REPO}/infra/harden.sh' | bash"
 
-echo ""
-echo "Rebooting server..."
-ssh_root "reboot" || true
-sleep 10
+# shellcheck disable=SC2086
+if ssh $SSH_OPTS "root@${SERVER_IP}" "echo ok" &>/dev/null; then
+    echo "Root SSH available — running harden.sh..."
+    ssh_as root "export DEBIAN_FRONTEND=noninteractive; curl -sSL '${REPO}/infra/harden.sh' | bash"
 
-wait_for_ssh "deploy"
+    echo ""
+    echo "Rebooting server..."
+    ssh_as root "reboot" || true
+    sleep 10
+
+    wait_for_ssh "deploy"
+# shellcheck disable=SC2086
+elif ssh $SSH_OPTS "deploy@${SERVER_IP}" "echo ok" &>/dev/null; then
+    echo "Root SSH disabled, deploy SSH works — Phase 1 already done, skipping."
+else
+    echo "ERROR: Cannot SSH as root or deploy to ${SERVER_IP}"
+    echo "Check that your SSH key is set up and the server is reachable."
+    exit 1
+fi
 
 # ── Phase 2: Setup ──────────────────────────────────────
 echo ""
 echo "=== Phase 2: Application Setup ==="
 
-# Upload config.env
+# Clean up any leftover state from failed runs
+echo "Preparing /opt/stoneshop..."
+ssh_as deploy "sudo rm -rf /opt/stoneshop; sudo mkdir -p /opt/stoneshop; sudo chown deploy:project /opt/stoneshop"
+
+# Upload config.env before setup.sh runs
 echo "Uploading config.env..."
-ssh_deploy "sudo mkdir -p /opt/stoneshop"
-scp -o StrictHostKeyChecking=accept-new "$CONFIG_FILE" "deploy@${SERVER_IP}:/tmp/config.env"
-ssh_deploy "sudo mv /tmp/config.env /opt/stoneshop/config.env && sudo chown deploy:project /opt/stoneshop/config.env && sudo chmod 600 /opt/stoneshop/config.env"
+upload_file "$CONFIG_FILE" "/opt/stoneshop/config.env" 600
 
 # Upload backup_key if present
 if [ -f "$BACKUP_KEY" ]; then
     echo "Uploading backup_key..."
-    ssh_deploy "sudo mkdir -p /opt/stoneshop/config/backup"
-    scp -o StrictHostKeyChecking=accept-new "$BACKUP_KEY" "deploy@${SERVER_IP}:/tmp/backup_key"
-    ssh_deploy "sudo mv /tmp/backup_key /opt/stoneshop/config/backup/backup_key && sudo chmod 600 /opt/stoneshop/config/backup/backup_key"
+    ssh_as deploy "sudo mkdir -p /opt/stoneshop/config/backup"
+    upload_file "$BACKUP_KEY" "/opt/stoneshop/config/backup/backup_key" 600
 else
-    echo "No backup_key found next to deploy.sh — skipping (import.sh will need it later)."
+    echo "No backup_key found — skipping (import will be skipped too)."
 fi
 
 # Run setup.sh
-ssh_deploy "sudo bash -c 'curl -sSL \"${REPO}/infra/setup.sh\" | bash'"
+echo "Running setup.sh..."
+ssh_as deploy "sudo bash -c 'export DEBIAN_FRONTEND=noninteractive; curl -sSL \"${REPO}/infra/setup.sh\" | bash'"
 
 # ── Phase 2.5: DNS ──────────────────────────────────────
 if [ -n "${HETZNER_DNS_TOKEN:-}" ]; then
     echo ""
     echo "=== DNS Setup ==="
-    ssh_deploy "cd /opt/stoneshop && sudo bash infra/dns.sh"
+    ssh_as deploy "cd /opt/stoneshop && sudo bash infra/dns.sh"
+    echo "Waiting 30s for DNS propagation..."
+    sleep 30
 else
     echo ""
-    echo "Skipping DNS setup (no HETZNER_DNS_TOKEN in config.env)."
-    echo "Create A records manually:"
+    echo "Skipping DNS (no HETZNER_DNS_TOKEN). Create A records manually:"
     echo "  ${SITE_DOMAIN} → ${SERVER_IP}"
     echo "  matomo.${SITE_DOMAIN} → ${SERVER_IP}"
 fi
@@ -155,34 +178,38 @@ fi
 if [ -f "$BACKUP_KEY" ]; then
     echo ""
     echo "=== Phase 2b: Data Import ==="
-    ssh_deploy "cd /opt/stoneshop && sudo bash infra/import.sh"
+    ssh_as deploy "cd /opt/stoneshop && sudo bash infra/import.sh"
 else
     echo ""
-    echo "Skipping data import (no backup_key). Run manually after placing it:"
-    echo "  ssh deploy@${SERVER_IP}"
-    echo "  cd /opt/stoneshop && sudo bash infra/import.sh"
+    echo "Skipping data import (no backup_key)."
+    echo "To import later:"
+    echo "  scp backup_key deploy@${SERVER_IP}:/opt/stoneshop/config/backup/backup_key"
+    echo "  ssh deploy@${SERVER_IP} 'cd /opt/stoneshop && sudo bash infra/import.sh'"
 fi
 
 # ── Verification ────────────────────────────────────────
 echo ""
 echo "=== Verification ==="
-echo "Checking services..."
-ssh_deploy "cd /opt/stoneshop && sudo docker compose ps"
+ssh_as deploy "cd /opt/stoneshop && sudo docker compose ps"
 
 echo ""
-echo "Checking HTTPS..."
+echo "Checking HTTPS (may take a moment for TLS cert)..."
+sleep 5
 if curl -sSf -o /dev/null -w "%{http_code}" --connect-timeout 10 "https://${SITE_DOMAIN}" 2>/dev/null; then
     echo "  https://${SITE_DOMAIN} — OK"
 else
-    echo "  https://${SITE_DOMAIN} — not yet reachable (DNS may still be propagating)"
+    echo "  https://${SITE_DOMAIN} — not yet reachable (DNS propagation or TLS provisioning)"
 fi
 
 echo ""
-echo "=== Deploy complete ==="
+echo "========================================="
+echo "  Deploy complete!"
+echo "========================================="
 echo ""
-echo "Your site: https://${SITE_DOMAIN}"
-echo "Matomo:    https://matomo.${SITE_DOMAIN}"
-echo "SSH:       ssh deploy@${SERVER_IP}"
+echo "  Site:    https://${SITE_DOMAIN}"
+echo "  Matomo:  https://matomo.${SITE_DOMAIN}"
+echo "  SSH:     ssh deploy@${SERVER_IP}"
 echo ""
-echo "config.env saved locally at: ${CONFIG_FILE}"
-echo "Keep this file safe — it contains all your secrets."
+echo "  Secrets: ${CONFIG_FILE}"
+echo "  Keep this file safe!"
+echo ""
