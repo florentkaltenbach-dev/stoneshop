@@ -192,7 +192,7 @@ run_script() {
     echo "[${phase_name}] Running..."
     local rc=0
     # shellcheck disable=SC2086
-    ssh $SSH_RUN "${user}@${SERVER_IP}" "${env_prefix:+$env_prefix }bash /tmp/_phase_script.sh" || rc=$?
+    ssh $SSH_RUN "${user}@${SERVER_IP}" "${env_prefix:+$env_prefix }bash /tmp/_phase_script.sh; rm -f /tmp/_phase_script.sh" || rc=$?
 
     if [ "$rc" -ne 0 ]; then
         echo ""
@@ -275,7 +275,7 @@ elif [ "$READY_USER" = "root" ]; then
 
     echo ""
     echo "Rebooting server..."
-    ssh_as root "reboot" || true
+    ssh_as deploy "sudo reboot" || true
     sleep 5
     wait_for_ssh "deploy"
     READY_USER="deploy"
