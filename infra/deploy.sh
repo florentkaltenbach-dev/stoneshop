@@ -185,12 +185,31 @@ upload_file() {
 }
 
 # ── Wait for server to be reachable ──────────────────────
-wait_for_ssh "root"
+echo "Waiting for SSH on ${SERVER_IP}..."
+READY_USER=""
+max_wait=120
+waited=0
+while [ -z "$READY_USER" ]; do
+    if ssh_probe "root" "echo ok" &>/dev/null; then
+        READY_USER="root"
+    elif ssh_probe "deploy" "echo ok" &>/dev/null; then
+        READY_USER="deploy"
+    else
+        sleep 5
+        waited=$((waited + 5))
+        if [ $waited -ge $max_wait ]; then
+            echo "ERROR: SSH not available as root or deploy after ${max_wait}s"
+            exit 1
+        fi
+        echo "  ...waiting (${waited}s)"
+    fi
+done
+echo "SSH ready (${READY_USER})."
 
 # ── Phase 1: Harden (skip if already done) ──────────────
 echo "=== Phase 1: Server Hardening ==="
 
-if ssh_probe "root" "echo ok" &>/dev/null; then
+if [ "$READY_USER" = "root" ]; then
     echo "Root SSH available — running harden.sh..."
     run_remote_script root "Phase 1: Harden" "${REPO}/infra/harden.sh" "export DEBIAN_FRONTEND=noninteractive;"
 
