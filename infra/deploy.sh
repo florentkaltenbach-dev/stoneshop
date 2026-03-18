@@ -41,9 +41,13 @@ for candidate in "${SCRIPT_DIR}/id_ed25519_hetzner" \
     fi
 done
 
-SSH_OPTS="-o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 -o BatchMode=yes"
+# BatchMode for short probe commands only
+SSH_PROBE="-o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 -o BatchMode=yes"
+# No BatchMode for long-running commands (avoids TTY/buffering issues in WSL)
+SSH_RUN="-o StrictHostKeyChecking=accept-new -o ConnectTimeout=10"
 if [ -n "$SSH_KEY" ]; then
-    SSH_OPTS="${SSH_OPTS} -i ${SSH_KEY}"
+    SSH_PROBE="${SSH_PROBE} -i ${SSH_KEY}"
+    SSH_RUN="${SSH_RUN} -i ${SSH_KEY}"
     echo "Using SSH key: ${SSH_KEY}"
 fi
 
@@ -101,26 +105,53 @@ echo "Config:  ${CONFIG_FILE}"
 echo ""
 
 # ── Helpers ─────────────────────────────────────────────
+
+# Short probe commands (BatchMode, quiet)
+ssh_probe() {
+    local user="$1"; shift
+    # shellcheck disable=SC2086
+    ssh $SSH_PROBE "${user}@${SERVER_IP}" "$@"
+}
+
+# Short commands that need output
 ssh_as() {
     local user="$1"; shift
     # shellcheck disable=SC2086
-    ssh $SSH_OPTS "${user}@${SERVER_IP}" "$@"
+    ssh $SSH_RUN "${user}@${SERVER_IP}" "$@"
 }
 
-# Streams output in real time via forced TTY. Kills if no output for 10 minutes.
-ssh_stream() {
-    local user="$1" phase_name="$2"; shift 2
-    echo "[${phase_name}] Streaming output..."
+# Download a script to the server, then execute it (streams output live)
+run_remote_script() {
+    local user="$1" phase_name="$2" url="$3"
+    shift 3
+    local env_prefix="${*:-}"
+
+    echo "[${phase_name}] Downloading script..."
+    ssh_as "$user" "curl -sSL '${url}' -o /tmp/_phase_script.sh && chmod +x /tmp/_phase_script.sh"
+
+    echo "[${phase_name}] Running..."
     local rc=0
     # shellcheck disable=SC2086
-    timeout --signal=KILL 600 ssh -tt $SSH_OPTS "${user}@${SERVER_IP}" "$@" || rc=$?
-    if [ "$rc" -eq 137 ] || [ "$rc" -eq 124 ]; then
+    ssh $SSH_RUN "${user}@${SERVER_IP}" "${env_prefix:+$env_prefix }bash /tmp/_phase_script.sh" || rc=$?
+
+    if [ "$rc" -ne 0 ]; then
         echo ""
-        echo "ERROR: ${phase_name} timed out (no output for 10 minutes)."
-        echo "SSH into the server and check what's running:"
+        echo "ERROR: ${phase_name} failed (exit code ${rc})."
+        echo "SSH into the server to investigate:"
         echo "  ssh deploy@${SERVER_IP}"
-        exit 1
-    elif [ "$rc" -ne 0 ]; then
+        exit "$rc"
+    fi
+}
+
+# Run a command on the server (streams output live)
+run_remote_cmd() {
+    local user="$1" phase_name="$2"; shift 2
+    echo "[${phase_name}] Running..."
+    local rc=0
+    # shellcheck disable=SC2086
+    ssh $SSH_RUN "${user}@${SERVER_IP}" "$@" || rc=$?
+
+    if [ "$rc" -ne 0 ]; then
         echo ""
         echo "ERROR: ${phase_name} failed (exit code ${rc})."
         exit "$rc"
@@ -132,8 +163,7 @@ wait_for_ssh() {
     local max_wait=120
     local waited=0
     echo "Waiting for SSH as ${user}@${SERVER_IP}..."
-    # shellcheck disable=SC2086
-    while ! ssh $SSH_OPTS "${user}@${SERVER_IP}" "echo ok" &>/dev/null; do
+    while ! ssh_probe "$user" "echo ok" &>/dev/null; do
         sleep 5
         waited=$((waited + 5))
         if [ $waited -ge $max_wait ]; then
@@ -154,13 +184,15 @@ upload_file() {
     ssh_as deploy "sudo mv /tmp/_upload ${dest} && sudo chmod ${mode} ${dest}"
 }
 
+# ── Wait for server to be reachable ──────────────────────
+wait_for_ssh "root"
+
 # ── Phase 1: Harden (skip if already done) ──────────────
 echo "=== Phase 1: Server Hardening ==="
 
-# shellcheck disable=SC2086
-if ssh $SSH_OPTS "root@${SERVER_IP}" "echo ok" &>/dev/null; then
+if ssh_probe "root" "echo ok" &>/dev/null; then
     echo "Root SSH available — running harden.sh..."
-    ssh_stream root "Phase 1: Harden" "export DEBIAN_FRONTEND=noninteractive; curl -sSL '${REPO}/infra/harden.sh' | bash"
+    run_remote_script root "Phase 1: Harden" "${REPO}/infra/harden.sh" "export DEBIAN_FRONTEND=noninteractive;"
 
     echo ""
     echo "Rebooting server..."
@@ -168,8 +200,7 @@ if ssh $SSH_OPTS "root@${SERVER_IP}" "echo ok" &>/dev/null; then
     sleep 10
 
     wait_for_ssh "deploy"
-# shellcheck disable=SC2086
-elif ssh $SSH_OPTS "deploy@${SERVER_IP}" "echo ok" &>/dev/null; then
+elif ssh_probe "deploy" "echo ok" &>/dev/null; then
     echo "Root SSH disabled, deploy SSH works — Phase 1 already done, skipping."
 else
     echo "ERROR: Cannot SSH as root or deploy to ${SERVER_IP}"
@@ -199,14 +230,13 @@ else
 fi
 
 # Run setup.sh
-echo "Running setup.sh..."
-ssh_stream deploy "Phase 2: Setup" "sudo bash -c 'export DEBIAN_FRONTEND=noninteractive; curl -sSL \"${REPO}/infra/setup.sh\" | bash'"
+run_remote_script deploy "Phase 2: Setup" "${REPO}/infra/setup.sh" "sudo DEBIAN_FRONTEND=noninteractive"
 
 # ── Phase 2.5: DNS ──────────────────────────────────────
 if [ -n "${HETZNER_DNS_TOKEN:-}" ]; then
     echo ""
     echo "=== DNS Setup ==="
-    ssh_stream deploy "DNS Setup" "cd /opt/stoneshop && sudo bash infra/dns.sh"
+    run_remote_cmd deploy "DNS Setup" "cd /opt/stoneshop && sudo bash infra/dns.sh"
     echo "Waiting 30s for DNS propagation..."
     sleep 30
 else
@@ -220,7 +250,7 @@ fi
 if [ -f "$BACKUP_KEY" ]; then
     echo ""
     echo "=== Phase 2b: Data Import ==="
-    ssh_stream deploy "Phase 2b: Import" "cd /opt/stoneshop && sudo bash infra/import.sh"
+    run_remote_cmd deploy "Phase 2b: Import" "cd /opt/stoneshop && sudo bash infra/import.sh"
 else
     echo ""
     echo "Skipping data import (no backup_key)."
