@@ -120,11 +120,16 @@ fi
 chmod 0600 "$CONFIG_ENV"
 chown deploy:deploy "$CONFIG_ENV"
 
+# Source all config vars
+set -a
+source "$CONFIG_ENV"
+set +a
+
 # Create .env symlink for Docker Compose
 ln -sf config.env "$INSTALL_DIR/.env"
 
 # ── Inject Matomo DB password into init.sql ──────────────
-MATOMO_DB_PASS=$(grep -m1 '^MATOMO_DATABASE_PASSWORD=' "$CONFIG_ENV" | cut -d= -f2-)
+MATOMO_DB_PASS="${MATOMO_DATABASE_PASSWORD:-}"
 if [ -n "$MATOMO_DB_PASS" ]; then
     sed -i "s|__MATOMO_DB_PASSWORD__|${MATOMO_DB_PASS}|g" "$INSTALL_DIR/config/mariadb/init.sql"
     echo "Injected Matomo DB password into init.sql."
@@ -143,7 +148,7 @@ if [ ! -f "$BACKUP_KEY" ]; then
     read -r -p "Press Enter after you've placed the key, or Ctrl-C to abort..."
 fi
 
-if [ -f "$BACKUP_KEY" ]; then
+if [ -f "$BACKUP_KEY" ] && [ -n "${STORAGEBOX_HOST:-}" ]; then
     chmod 0600 "$BACKUP_KEY"
     chown deploy:deploy "$BACKUP_KEY"
 
@@ -156,9 +161,9 @@ if [ -f "$BACKUP_KEY" ]; then
         cat >> "$DEPLOY_SSH_DIR/config" <<SSHCFG
 
 Host storagebox
-    HostName u432319.your-storagebox.de
-    User u432319
-    Port 23
+    HostName ${STORAGEBOX_HOST}
+    User ${STORAGEBOX_USER}
+    Port ${STORAGEBOX_PORT:-23}
     IdentityFile ${BACKUP_KEY}
     StrictHostKeyChecking accept-new
 SSHCFG
@@ -168,10 +173,12 @@ SSHCFG
     chown -R deploy:deploy "$DEPLOY_SSH_DIR"
 
     # Add StorageBox to known_hosts
-    sudo -u deploy ssh-keyscan -p 23 u432319.your-storagebox.de >> "$DEPLOY_SSH_DIR/known_hosts" 2>/dev/null || true
+    sudo -u deploy ssh-keyscan -p "${STORAGEBOX_PORT:-23}" "$STORAGEBOX_HOST" >> "$DEPLOY_SSH_DIR/known_hosts" 2>/dev/null || true
     echo "StorageBox SSH configured."
-else
+elif [ ! -f "$BACKUP_KEY" ]; then
     echo "WARNING: No backup key found. Restic backups will not work until configured." >&2
+else
+    echo "WARNING: STORAGEBOX_HOST not set in config.env. SSH config not created." >&2
 fi
 
 # ── Restic Repository Init ───────────────────────────────

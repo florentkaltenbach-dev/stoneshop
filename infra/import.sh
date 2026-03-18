@@ -35,6 +35,27 @@ run_restic() {
         restic "$@"
 }
 
+# ── Ensure StorageBox SSH config exists ───────────────────
+DEPLOY_SSH_DIR="/home/deploy/.ssh"
+BACKUP_KEY="$INSTALL_DIR/config/backup/backup_key"
+if [ -n "${STORAGEBOX_HOST:-}" ] && ! grep -q "Host storagebox" "$DEPLOY_SSH_DIR/config" 2>/dev/null; then
+    echo "StorageBox SSH config missing — creating it..."
+    mkdir -p "$DEPLOY_SSH_DIR"
+    cat >> "$DEPLOY_SSH_DIR/config" <<SSHCFG
+
+Host storagebox
+    HostName ${STORAGEBOX_HOST}
+    User ${STORAGEBOX_USER}
+    Port ${STORAGEBOX_PORT:-23}
+    IdentityFile ${BACKUP_KEY}
+    StrictHostKeyChecking accept-new
+SSHCFG
+    chmod 0600 "$DEPLOY_SSH_DIR/config"
+    chown -R deploy:deploy "$DEPLOY_SSH_DIR"
+    sudo -u deploy ssh-keyscan -p "${STORAGEBOX_PORT:-23}" "$STORAGEBOX_HOST" >> "$DEPLOY_SSH_DIR/known_hosts" 2>/dev/null || true
+    echo "StorageBox SSH configured."
+fi
+
 echo "=== StoneShop Data Import ==="
 
 # ── Healthcheck Gate ──────────────────────────────────────

@@ -146,6 +146,18 @@ prompt RESTIC_PASSWORD "Restic password" "$RESTIC_PW_DEFAULT" true
 RESTIC_PASSWORD="$REPLY"
 echo ""
 
+# ── StorageBox ────────────────────────────────────────────
+echo "── StorageBox (backup target) ─────────────"
+prompt STORAGEBOX_HOST "StorageBox hostname" "uXXXXXX.your-storagebox.de"
+STORAGEBOX_HOST="$REPLY"
+
+prompt STORAGEBOX_USER "StorageBox user" "uXXXXXX"
+STORAGEBOX_USER="$REPLY"
+
+prompt STORAGEBOX_PORT "StorageBox SSH port" "23"
+STORAGEBOX_PORT="$REPLY"
+echo ""
+
 # ── CrowdSec ─────────────────────────────────────────────
 echo "── CrowdSec (optional) ───────────────────"
 prompt CROWDSEC_ENROLL_KEY "CrowdSec enrollment key (leave empty to skip)" ""
@@ -190,6 +202,11 @@ NONCE_SALT=${NONCE_SALT}
 # ── Restic backup ───────────────────────────────────────
 RESTIC_REPOSITORY=${RESTIC_REPOSITORY}
 RESTIC_PASSWORD=${RESTIC_PASSWORD}
+
+# ── StorageBox (backup target) ────────────────────────
+STORAGEBOX_HOST=${STORAGEBOX_HOST}
+STORAGEBOX_USER=${STORAGEBOX_USER}
+STORAGEBOX_PORT=${STORAGEBOX_PORT}
 
 # ── CrowdSec (optional) ────────────────────────────────
 CROWDSEC_ENROLL_KEY=${CROWDSEC_ENROLL_KEY}
