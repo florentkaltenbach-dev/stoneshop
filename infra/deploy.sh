@@ -104,8 +104,8 @@ for candidate in "${SCRIPT_DIR}/id_ed25519_hetzner" \
     fi
 done
 
-SSH_PROBE="-o StrictHostKeyChecking=accept-new -o ConnectTimeout=5"
-SSH_RUN="-o StrictHostKeyChecking=accept-new -o ConnectTimeout=10"
+SSH_PROBE="-o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 -o BatchMode=yes"
+SSH_RUN="-o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 -o BatchMode=yes"
 if [ -n "$SSH_KEY" ]; then
     SSH_PROBE="${SSH_PROBE} -i ${SSH_KEY}"
     SSH_RUN="${SSH_RUN} -i ${SSH_KEY}"

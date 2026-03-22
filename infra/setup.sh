@@ -67,9 +67,12 @@ if [ -d "$INSTALL_DIR/.git" ]; then
 elif [ -d "$INSTALL_DIR" ]; then
     echo "Directory exists but is not a git repo — removing stale directory..."
     rm -rf "$INSTALL_DIR"
+    mkdir -p "$INSTALL_DIR"
+    chown deploy:project "$INSTALL_DIR"
     sudo -u deploy git clone "$REPO_URL" "$INSTALL_DIR"
 else
-    mkdir -p "$(dirname "$INSTALL_DIR")"
+    mkdir -p "$INSTALL_DIR"
+    chown deploy:project "$INSTALL_DIR"
     sudo -u deploy git clone "$REPO_URL" "$INSTALL_DIR"
 fi
 chown deploy:project "$INSTALL_DIR"
