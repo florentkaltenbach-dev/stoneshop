@@ -38,7 +38,7 @@ CONF="${MAILCOW_DIR}/mailcow.conf"
 if [ -f "$CONF" ]; then
     # Apply our required overrides (idempotent)
     sed -i "s|^MAILCOW_HOSTNAME=.*|MAILCOW_HOSTNAME=${MAIL_HOSTNAME}|" "$CONF"
-    sed -i "s|^HTTP_BIND=.*|HTTP_BIND=127.0.0.1|" "$CONF"
+    sed -i "s|^HTTP_BIND=.*|HTTP_BIND=0.0.0.0|" "$CONF"
     sed -i "s|^HTTP_PORT=.*|HTTP_PORT=8880|" "$CONF"
     sed -i "s|^HTTPS_BIND=.*|HTTPS_BIND=127.0.0.1|" "$CONF"
     sed -i "s|^HTTPS_PORT=.*|HTTPS_PORT=8443|" "$CONF"
@@ -62,7 +62,7 @@ DBUSER=mailcow
 DBPASS=${DBPASS_GEN}
 DBROOT=${DBROOT_GEN}
 REDISPASS=${REDIS_PW}
-HTTP_BIND=127.0.0.1
+HTTP_BIND=0.0.0.0
 HTTP_PORT=8880
 HTTPS_BIND=127.0.0.1
 HTTPS_PORT=8443
