@@ -33,18 +33,10 @@ cd "${MAILCOW_DIR}"
 # ── Generate mailcow.conf ──────────────────────────────
 log_info "Generating mailcow.conf..."
 
-# Use Mailcow's own generate_config if available, then override
-if [ -f "${MAILCOW_DIR}/generate_config.sh" ] && [ ! -f "${MAILCOW_DIR}/mailcow.conf" ]; then
-    log_info "Running Mailcow generate_config.sh..."
-    MAILCOW_HOSTNAME="${MAIL_HOSTNAME}" \
-    MAILCOW_TZ="Europe/Berlin" \
-    bash "${MAILCOW_DIR}/generate_config.sh" || true
-fi
-
-# Apply our required overrides (idempotent)
+# Generate mailcow.conf — skip interactive generate_config.sh, write directly
 CONF="${MAILCOW_DIR}/mailcow.conf"
 if [ -f "$CONF" ]; then
-    # Override settings in existing conf
+    # Apply our required overrides (idempotent)
     sed -i "s|^MAILCOW_HOSTNAME=.*|MAILCOW_HOSTNAME=${MAIL_HOSTNAME}|" "$CONF"
     sed -i "s|^HTTP_BIND=.*|HTTP_BIND=127.0.0.1|" "$CONF"
     sed -i "s|^HTTP_PORT=.*|HTTP_PORT=8880|" "$CONF"
@@ -59,7 +51,7 @@ if [ -f "$CONF" ]; then
         sed -i "s|^SKIP_SOLR=.*|SKIP_SOLR=y|" "$CONF"
     fi
 else
-    # Create minimal conf
+    # Create conf from scratch (no interactive generate_config.sh needed)
     cat > "$CONF" <<MCEOF
 MAILCOW_HOSTNAME=${MAIL_HOSTNAME}
 DBNAME=mailcow

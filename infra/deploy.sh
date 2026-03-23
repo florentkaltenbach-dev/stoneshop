@@ -12,6 +12,11 @@ REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 CONFIG_FILE="${SCRIPT_DIR}/config.env"
 BACKUP_KEY="${SCRIPT_DIR}/backup_key"
 STATE_FILE="${SCRIPT_DIR}/.deploy-state"
+LOG_FILE="${SCRIPT_DIR}/deploy-$(date +%Y%m%d-%H%M%S).log"
+
+# Tee all output to log file
+exec > >(tee -a "$LOG_FILE") 2>&1
+echo "Log: ${LOG_FILE}"
 
 # ── Parse arguments ─────────────────────────────────────
 FRESH=false
@@ -104,6 +109,7 @@ last_checkpoint() {
 if [ "$RESET" = true ]; then
     echo "Clearing all deploy state (--reset)..."
     rm -f "$STATE_FILE"
+    FRESH=true
 fi
 
 if [ -n "$RESET_MODE" ]; then
@@ -206,12 +212,6 @@ fi
 if [ "$FRESH" = true ]; then
     echo "Clearing known_hosts for ${SERVER_IP} (--fresh)..."
     ssh-keygen -R "$SERVER_IP" 2>/dev/null || true
-    for user in root deploy; do
-        # shellcheck disable=SC2086
-        ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 \
-            ${SSH_KEY:+-i "$SSH_KEY"} \
-            "${user}@${SERVER_IP}" "echo ok" < /dev/null 2>/dev/null && break
-    done || true
 fi
 
 # ── Helpers ─────────────────────────────────────────────
@@ -236,13 +236,27 @@ run_script() {
     echo "[${phase_name}] Uploading $(basename "$local_script")..."
     local scp_opts="-o StrictHostKeyChecking=accept-new -o ConnectTimeout=10"
     [ -n "$SSH_KEY" ] && scp_opts="${scp_opts} -i ${SSH_KEY}"
+
+    # Upload lib/ directory so scripts can source common.sh
+    local script_parent
+    script_parent="$(dirname "$local_script")"
+    if [ -d "${script_parent}/lib" ]; then
+        # shellcheck disable=SC2086
+        ssh $SSH_RUN "${user}@${SERVER_IP}" "mkdir -p /tmp/lib"
+        for lib_file in "${script_parent}"/lib/*.sh; do
+            [ -f "$lib_file" ] || continue
+            # shellcheck disable=SC2086
+            scp $scp_opts "$lib_file" "${user}@${SERVER_IP}:/tmp/lib/$(basename "$lib_file")"
+        done
+    fi
+
     # shellcheck disable=SC2086
     scp $scp_opts "$local_script" "${user}@${SERVER_IP}:/tmp/_phase_script.sh"
 
     echo "[${phase_name}] Running..."
     local rc=0
     # shellcheck disable=SC2086
-    ssh $SSH_RUN "${user}@${SERVER_IP}" "${env_prefix:+$env_prefix }bash /tmp/_phase_script.sh; rm -f /tmp/_phase_script.sh" || rc=$?
+    ssh $SSH_RUN "${user}@${SERVER_IP}" "${env_prefix:+$env_prefix }bash /tmp/_phase_script.sh; _rc=\$?; rm -rf /tmp/_phase_script.sh /tmp/lib; exit \$_rc" || rc=$?
 
     if [ "$rc" -ne 0 ]; then
         echo ""
@@ -269,14 +283,23 @@ run_remote_cmd() {
 
 wait_for_ssh() {
     local user="$1"
-    local max_wait=30
+    local max_wait=60
     local waited=0
+    local probe_err=""
     echo "Waiting for SSH as ${user}@${SERVER_IP}..."
-    while ! ssh_probe "$user" "echo ok" &>/dev/null; do
+    while true; do
+        if probe_err=$(ssh_probe "$user" "echo ok" 2>&1); then
+            break
+        fi
         sleep 5
         waited=$((waited + 5))
         if [ $waited -ge $max_wait ]; then
+            echo ""
+            echo "Last SSH error:"
+            echo "$probe_err"
+            echo ""
             echo "ERROR: SSH not available after ${max_wait}s"
+            echo "Full log: ${LOG_FILE}"
             exit 1
         fi
         echo "  ...waiting (${waited}s)"
@@ -298,16 +321,31 @@ echo "Waiting for SSH on ${SERVER_IP}..."
 READY_USER=""
 max_wait=30
 waited=0
+host_key_fixed=false
 while [ -z "$READY_USER" ]; do
-    if ssh_probe "deploy" "echo ok" &>/dev/null; then
+    probe_err=""
+    if probe_err=$(ssh_probe "deploy" "echo ok" 2>&1); then
         READY_USER="deploy"
-    elif ssh_probe "root" "echo ok" &>/dev/null; then
+    elif probe_err=$(ssh_probe "root" "echo ok" 2>&1); then
         READY_USER="root"
     else
+        # Auto-fix host key change (once)
+        if [ "$host_key_fixed" = false ] && echo "$probe_err" | grep -q "REMOTE HOST IDENTIFICATION HAS CHANGED"; then
+            echo "  Host key changed — auto-clearing known_hosts for ${SERVER_IP}..."
+            ssh-keygen -R "$SERVER_IP" 2>/dev/null || true
+            host_key_fixed=true
+            continue  # retry immediately
+        fi
+
         sleep 5
         waited=$((waited + 5))
         if [ $waited -ge $max_wait ]; then
+            echo ""
+            echo "Last SSH error:"
+            echo "$probe_err"
+            echo ""
             echo "ERROR: SSH not available as root or deploy after ${max_wait}s"
+            echo "Full log: ${LOG_FILE}"
             exit 1
         fi
         echo "  ...waiting (${waited}s)"
@@ -370,6 +408,11 @@ else
     run_script deploy "Phase 2: Setup" "${SCRIPT_DIR}/setup.sh" "sudo DEBIAN_FRONTEND=noninteractive"
     mark_done "setup-shared"
 fi
+
+# ── Sync latest code to server ────────────────────────────
+echo ""
+echo "Syncing latest code to server..."
+ssh_as deploy "cd /opt/dockbase && git pull --ff-only" || true
 
 # ══════════════════════════════════════════════════════════
 #  Phase 3: Shared Caddy
@@ -558,5 +601,6 @@ echo ""
 echo "  SSH:     ssh deploy@${SERVER_IP}"
 echo "  Secrets: ${CONFIG_FILE}"
 echo "  State:   ${STATE_FILE}"
+echo "  Log:     ${LOG_FILE}"
 echo "  Keep both files safe!"
 echo ""
