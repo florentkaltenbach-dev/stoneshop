@@ -1,7 +1,8 @@
 #!/bin/bash
-# StoneShop Server Hardening — Phase 1
+# Dockbase Server Hardening — Phase 1
 # Run as root on a fresh Ubuntu 24.04 server.
-# Usage: sudo bash harden.sh
+# Usage: sudo DEPLOY_MODE=full bash harden.sh
+# DEPLOY_MODE controls which firewall ports are opened (mail ports for full/mail).
 
 set -Eeuo pipefail
 
@@ -10,22 +11,24 @@ if [ "$(id -u)" -ne 0 ]; then
     exit 1
 fi
 
-echo "=== StoneShop Server Hardening ==="
+DEPLOY_MODE="${DEPLOY_MODE:-full}"
+
+echo "=== Dockbase Server Hardening (mode: ${DEPLOY_MODE}) ==="
 
 # ── Hostname ──────────────────────────────────────────────
-echo "Setting hostname to stoneshop..."
-hostnamectl set-hostname stoneshop
+echo "Setting hostname to dockbase..."
+hostnamectl set-hostname dockbase
 
 # ── Groups and Users ─────────────────────────────────────
 echo "Creating groups and deploy user..."
-groupadd -f --gid 1100 stoneshop
+groupadd -f --gid 1100 dockbase
 groupadd -f project
 
 if ! id deploy &>/dev/null; then
-    useradd -m -u 1001 -s /bin/bash -G sudo,stoneshop,project deploy
+    useradd -m -u 1001 -s /bin/bash -G sudo,dockbase,project deploy
     echo "Created user 'deploy'. Set a password or add SSH keys manually."
 else
-    usermod -aG sudo,stoneshop,project deploy
+    usermod -aG sudo,dockbase,project deploy
     echo "User 'deploy' already exists, updated groups."
 fi
 
@@ -53,7 +56,7 @@ sudo -u deploy mkdir -p /home/deploy/.ssh
 chmod 700 /home/deploy/.ssh
 chown deploy:deploy /home/deploy/.ssh
 
-# Copy SSH keys from root if available, otherwise prompt
+# Copy SSH keys from root if available
 if [ -f /root/.ssh/authorized_keys ]; then
     cp /root/.ssh/authorized_keys /home/deploy/.ssh/authorized_keys
     chown deploy:deploy /home/deploy/.ssh/authorized_keys
@@ -65,7 +68,7 @@ fi
 
 systemctl restart ssh
 
-# ── UFW Firewall ──────────────────────────────────────────
+# ── UFW Firewall (mode-aware) ────────────────────────────
 echo "Configuring UFW..."
 apt-get update -qq
 apt-get install -y -qq ufw
@@ -77,9 +80,25 @@ ufw allow 22/tcp comment 'SSH'
 ufw allow 80/tcp comment 'HTTP'
 ufw allow 443/tcp comment 'HTTPS'
 ufw allow 443/udp comment 'HTTP/3 QUIC'
+
+# Mail ports only when mode includes mail
+case "$DEPLOY_MODE" in
+    full|mail)
+        echo "Opening mail ports (mode: ${DEPLOY_MODE})..."
+        ufw allow 25/tcp comment 'SMTP'
+        ufw allow 465/tcp comment 'SMTPS'
+        ufw allow 587/tcp comment 'Submission'
+        ufw allow 993/tcp comment 'IMAPS'
+        ufw allow 4190/tcp comment 'ManageSieve'
+        ;;
+    *)
+        echo "Mail ports not opened (mode: ${DEPLOY_MODE})."
+        ;;
+esac
+
 ufw --force enable
 
-# ── fail2ban ──────────────────────────────────────────────
+# ── fail2ban (sshd-only) ────────────────────────────────
 echo "Installing fail2ban..."
 apt-get install -y -qq fail2ban
 
@@ -97,7 +116,7 @@ systemctl restart fail2ban
 
 # ── Sysctl Hardening ─────────────────────────────────────
 echo "Applying sysctl hardening..."
-cat > /etc/sysctl.d/99-stoneshop.conf <<'SYSEOF'
+cat > /etc/sysctl.d/99-dockbase.conf <<'SYSEOF'
 # Swap
 vm.swappiness = 10
 
@@ -160,16 +179,16 @@ APT::Periodic::Unattended-Upgrade "1";
 AUEOF
 
 # ── Logrotate ─────────────────────────────────────────────
-echo "Configuring logrotate for stoneshop..."
-cat > /etc/logrotate.d/stoneshop <<'LREOF'
-/opt/stoneshop/logs/*.log {
+echo "Configuring logrotate for dockbase..."
+cat > /etc/logrotate.d/dockbase <<'LREOF'
+/opt/dockbase/logs/*.log /opt/dockbase/logs/**/*.log {
     daily
     missingok
     rotate 14
     compress
     delaycompress
     notifempty
-    create 0640 deploy stoneshop
+    create 0640 deploy dockbase
     sharedscripts
 }
 LREOF
@@ -189,4 +208,4 @@ echo ""
 echo "Next steps:"
 echo "  1. Add SSH public key: /home/deploy/.ssh/authorized_keys"
 echo "  2. Test SSH login as deploy before closing this session"
-echo "  3. Run infra/setup.sh to install Docker and deploy the stack"
+echo "  3. Run infra/setup.sh to install Docker and set up shared infrastructure"

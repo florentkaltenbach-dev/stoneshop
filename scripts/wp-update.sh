@@ -4,8 +4,8 @@
 
 set -e
 
-LOG_FILE="/opt/stoneshop/logs/wp-updates.log"
-CONTAINER="stoneshop_frankenphp"
+LOG_FILE="/opt/dockbase/logs/wp-updates.log"
+CONTAINER="dockbase_frankenphp"
 WP_CMD="wp --path=/app/web/wp"
 
 log() {
@@ -39,6 +39,6 @@ docker exec $CONTAINER $WP_CMD wc update 2>&1 | tee -a "$LOG_FILE" || true
 # Clear caches
 log "Clearing caches..."
 docker exec $CONTAINER $WP_CMD cache flush 2>&1 | tee -a "$LOG_FILE" || true
-docker exec stoneshop_keydb keydb-cli FLUSHALL 2>&1 | tee -a "$LOG_FILE" || true
+docker exec dockbase_keydb keydb-cli FLUSHALL 2>&1 | tee -a "$LOG_FILE" || true
 
 log "========== WordPress Update Complete =========="

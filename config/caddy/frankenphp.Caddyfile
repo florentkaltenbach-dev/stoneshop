@@ -1,0 +1,43 @@
+{
+    frankenphp
+    order php_server before file_server
+    servers {
+        trusted_proxies static private_ranges
+    }
+}
+
+:8080 {
+    root * /app/web
+
+    # Defense-in-depth header (TLS headers are on the edge Caddy)
+    header X-Content-Type-Options "nosniff"
+
+    # Block sensitive paths
+    @blocked path /.env* /composer.* /config/* /vendor/* /.git* /readme.html /license.txt /wp/readme.html /wp/license.txt /app/mu-plugins/* /app/upgrade/*
+    respond @blocked 404
+
+    # Ensure /wp?rest_route=... requests hit WordPress front controller
+    @wp_rest_route {
+        path /wp
+        query rest_route=*
+    }
+    rewrite @wp_rest_route /wp/index.php
+
+    # Well-known directory
+    handle_path /.well-known/* {
+        root * /app/web/.well-known
+        file_server
+    }
+
+    # Compression
+    encode zstd gzip
+
+    # PHP server
+    php_server
+
+    # Internal debug log (separate from shared edge access log)
+    log {
+        output file /var/log/caddy/frankenphp.log
+        format json
+    }
+}

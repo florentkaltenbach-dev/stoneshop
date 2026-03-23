@@ -1,0 +1,57 @@
+services:
+  caddy:
+    image: caddy:latest
+    container_name: dockbase_caddy
+    restart: unless-stopped
+    ports:
+      - "0.0.0.0:80:80"
+      - "0.0.0.0:443:443"
+      - "0.0.0.0:443:443/udp"
+    env_file: ./config.env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./config/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_shared_data:/data
+      - caddy_shared_config:/config
+      - /opt/dockbase/logs/caddy:/var/log/caddy
+      - /opt/dockbase/website/public:/srv/website/public:ro
+    networks:
+      - dockbase-proxy
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: '1'
+    healthcheck:
+      test: ["CMD", "caddy", "version"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  crowdsec:
+    image: crowdsecurity/crowdsec:latest
+    container_name: dockbase_crowdsec
+    restart: unless-stopped
+    environment:
+      COLLECTIONS: "crowdsecurity/caddy crowdsecurity/http-cve crowdsecurity/wordpress"
+    volumes:
+      - crowdsec_data:/var/lib/crowdsec/data
+      - /opt/dockbase/logs/caddy:/var/log/caddy:ro
+    networks:
+      - dockbase-proxy
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.5'
+
+networks:
+  dockbase-proxy:
+    external: true
+
+volumes:
+  caddy_shared_data:
+  caddy_shared_config:
+  crowdsec_data:

@@ -1,20 +1,20 @@
 #!/bin/bash
-# StoneShop Setup — Phase 2
-# Installs Docker, clones the repo, and boots the stack.
+# Dockbase Setup — Phase 2: Shared prerequisites
+# Installs Docker, clones the repo, configures backup access.
+# Stack-specific setup is handled by setup-caddy.sh, setup-shop.sh, etc.
 # Run as root after harden.sh.
 # Usage: sudo bash setup.sh
 
 set -Eeuo pipefail
 
-if [ "$(id -u)" -ne 0 ]; then
-    echo "ERROR: Must run as root" >&2
-    exit 1
-fi
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "${SCRIPT_DIR}/lib/common.sh"
+
+require_root
 
 REPO_URL="https://github.com/florentkaltenbach-dev/stoneshop.git"
-INSTALL_DIR="/opt/stoneshop"
 
-echo "=== StoneShop Setup ==="
+echo "=== Dockbase Setup ==="
 
 # ── Docker CE ─────────────────────────────────────────────
 echo "Installing Docker CE..."
@@ -78,14 +78,22 @@ fi
 chown deploy:project "$INSTALL_DIR"
 
 # ── Move staged config files from /tmp ───────────────────
-if [ -f /tmp/stoneshop-config.env ]; then
-    mv /tmp/stoneshop-config.env "$INSTALL_DIR/config.env"
+if [ -f /tmp/dockbase-config.env ]; then
+    mv /tmp/dockbase-config.env "$INSTALL_DIR/config.env"
     echo "Moved config.env into place."
 fi
-if [ -f /tmp/stoneshop-backup_key ]; then
+if [ -f /tmp/dockbase-backup_key ]; then
     mkdir -p "$INSTALL_DIR/config/backup"
-    mv /tmp/stoneshop-backup_key "$INSTALL_DIR/config/backup/backup_key"
+    mv /tmp/dockbase-backup_key "$INSTALL_DIR/config/backup/backup_key"
     echo "Moved backup_key into place."
+fi
+if [ -f /tmp/dockbase-domains.conf ]; then
+    mv /tmp/dockbase-domains.conf "$INSTALL_DIR/config/domains.conf"
+    echo "Moved domains.conf into place."
+fi
+if [ -f /tmp/dockbase-mail-domains.conf ]; then
+    mv /tmp/dockbase-mail-domains.conf "$INSTALL_DIR/config/mail-domains.conf"
+    echo "Moved mail-domains.conf into place."
 fi
 
 # ── Ownership & Permissions ──────────────────────────────
@@ -93,8 +101,8 @@ echo "Setting ownership and permissions..."
 chown -R deploy:project "$INSTALL_DIR"
 find "$INSTALL_DIR" -type d -exec chmod g+s {} +
 
-mkdir -p "$INSTALL_DIR/logs"
-chown deploy:stoneshop "$INSTALL_DIR/logs"
+mkdir -p "$INSTALL_DIR/logs" "$INSTALL_DIR/logs/frankenphp"
+chown -R deploy:dockbase "$INSTALL_DIR/logs"
 chmod 2775 "$INSTALL_DIR/logs"
 
 mkdir -p "$INSTALL_DIR/backups/db" "$INSTALL_DIR/backups/uploads"
@@ -131,13 +139,19 @@ set +a
 # Create .env symlink for Docker Compose
 ln -sf config.env "$INSTALL_DIR/.env"
 
-# ── Inject Matomo DB password into init.sql ──────────────
-MATOMO_DB_PASS="${MATOMO_DATABASE_PASSWORD:-}"
-if [ -n "$MATOMO_DB_PASS" ]; then
-    sed -i "s|__MATOMO_DB_PASSWORD__|${MATOMO_DB_PASS}|g" "$INSTALL_DIR/config/mariadb/init.sql"
-    echo "Injected Matomo DB password into init.sql."
+# ── Inject DB passwords into init.sql ────────────────────
+INIT_SQL="$INSTALL_DIR/config/mariadb/init.sql"
+if [ -n "${MATOMO_SHOP_DATABASE_PASSWORD:-}" ]; then
+    sed -i "s|__MATOMO_SHOP_DB_PASSWORD__|${MATOMO_SHOP_DATABASE_PASSWORD}|g" "$INIT_SQL"
+    echo "Injected Shop Matomo DB password into init.sql."
 else
-    echo "WARNING: MATOMO_DATABASE_PASSWORD not found in config.env. init.sql NOT updated." >&2
+    echo "WARNING: MATOMO_SHOP_DATABASE_PASSWORD not set. init.sql NOT fully updated." >&2
+fi
+if [ -n "${MATOMO_WEB_DATABASE_PASSWORD:-}" ]; then
+    sed -i "s|__MATOMO_WEB_DB_PASSWORD__|${MATOMO_WEB_DATABASE_PASSWORD}|g" "$INIT_SQL"
+    echo "Injected Web Matomo DB password into init.sql."
+else
+    echo "WARNING: MATOMO_WEB_DATABASE_PASSWORD not set. init.sql NOT fully updated." >&2
 fi
 
 # ── SSH config for StorageBox ─────────────────────────────
@@ -194,68 +208,7 @@ else
         echo "WARNING: Could not init Restic repo. Check backup_key and config.env." >&2
 fi
 
-# ── Build & Start Stack ──────────────────────────────────
-echo "Building and starting Docker stack..."
-cd "$INSTALL_DIR"
-sudo -u deploy docker compose build
-sudo -u deploy docker compose up -d
-
-echo "Waiting for containers to become healthy..."
-TIMEOUT=300
-ELAPSED=0
-while [ $ELAPSED -lt $TIMEOUT ]; do
-    UNHEALTHY=$(docker compose ps --format json 2>/dev/null | \
-        jq -r 'select(.Health != "healthy" and .Health != "" and .Health != null) | .Name' 2>/dev/null | wc -l || echo "0")
-    if [ "$UNHEALTHY" -eq 0 ]; then
-        break
-    fi
-    sleep 5
-    ELAPSED=$((ELAPSED + 5))
-done
-
-if [ $ELAPSED -ge $TIMEOUT ]; then
-    echo "WARNING: Some containers did not become healthy within ${TIMEOUT}s"
-    docker compose ps
-else
-    echo "All containers healthy."
-fi
-
-# ── Cron Jobs ─────────────────────────────────────────────
-echo "Setting up cron jobs for deploy user..."
-
-# Remove existing stoneshop cron entries and add fresh ones
-CRON_TMP=$(mktemp)
-chmod 644 "$CRON_TMP"
-sudo -u deploy crontab -l 2>/dev/null | grep -v '/opt/stoneshop/' > "$CRON_TMP" || true
-cat >> "$CRON_TMP" <<'CRONEOF'
-# StoneShop: WordPress auto-update (04:00 daily)
-0 4 * * * /opt/stoneshop/scripts/wp-update.sh >> /opt/stoneshop/logs/wp-updates.log 2>&1
-# StoneShop: Backup (04:30 daily)
-30 4 * * * /opt/stoneshop/config/backup/scripts/backup.sh
-CRONEOF
-
-sudo -u deploy crontab "$CRON_TMP"
-rm -f "$CRON_TMP"
-echo "Cron jobs installed."
-
-# ── CrowdSec Enrollment ──────────────────────────────────
-CROWDSEC_KEY=$(grep -m1 '^CROWDSEC_ENROLL_KEY=' "$CONFIG_ENV" | cut -d= -f2- || true)
-if [ -n "$CROWDSEC_KEY" ]; then
-    echo "Enrolling CrowdSec..."
-    docker exec stoneshop_crowdsec cscli console enroll "$CROWDSEC_KEY" || \
-        echo "WARNING: CrowdSec enrollment failed. Enroll manually later." >&2
-else
-    echo "No CROWDSEC_ENROLL_KEY in config.env. Skipping enrollment."
-    echo "To enroll later: docker exec stoneshop_crowdsec cscli console enroll <key>"
-fi
-
 echo ""
-echo "=== Setup complete ==="
+echo "=== Shared setup complete ==="
 echo ""
-echo "Stack status:"
-docker compose ps
-echo ""
-echo "Next steps:"
-echo "  1. Run infra/import.sh to restore data from backup"
-echo "  2. Verify: curl -I https://\$(grep SITE_DOMAIN ${CONFIG_ENV} | cut -d= -f2)"
-echo "  3. Add CrowdSec bouncer for active blocking (optional)"
+echo "Next: run setup-caddy.sh, then setup-shop.sh / setup-mailcow.sh / setup-website.sh"

@@ -1,6 +1,7 @@
 # Secrets
 config.env
 .env
+initial-passwords.txt
 
 # Deploy state (local to your machine)
 .deploy-state

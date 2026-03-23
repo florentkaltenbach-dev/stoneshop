@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# StoneShop One-Click Deploy
-# Run from your laptop: ./deploy.sh <server-ip>
+# Dockbase One-Click Deploy
+# Run from your laptop: ./deploy.sh [options] <server-ip>
 #
-# State is tracked in .deploy-state next to this script.
+# State is tracked in .deploy-state with mode-prefixed entries.
 # Safe to re-run — completed phases are skipped.
-# Use --reset to start over from scratch.
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -17,64 +16,80 @@ STATE_FILE="${SCRIPT_DIR}/.deploy-state"
 # ── Parse arguments ─────────────────────────────────────
 FRESH=false
 RESET=false
-for arg in "$@"; do
-    case "$arg" in
-        --fresh) FRESH=true ;;
-        --reset) RESET=true ;;
-    esac
-done
+RESET_MODE=""
+DEPLOY_MODE="full"
+DO_RESTORE=false
+CONFIGURE_ONLY=false
+VERBOSE=false
 
 POSITIONAL=()
-for arg in "$@"; do
-    case "$arg" in
-        --fresh|--reset) ;;
-        *) POSITIONAL+=("$arg") ;;
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --fresh) FRESH=true; shift ;;
+        --reset) RESET=true; shift ;;
+        --reset-mode)
+            RESET_MODE="${2:-}"
+            [ -z "$RESET_MODE" ] && { echo "ERROR: --reset-mode requires a mode argument"; exit 1; }
+            shift 2 ;;
+        --mode)
+            DEPLOY_MODE="${2:-}"
+            [ -z "$DEPLOY_MODE" ] && { echo "ERROR: --mode requires an argument (full|shop|mail|web)"; exit 1; }
+            shift 2 ;;
+        --restore) DO_RESTORE=true; shift ;;
+        --configure) CONFIGURE_ONLY=true; shift ;;
+        --verbose) VERBOSE=true; shift ;;
+        -*) echo "Unknown option: $1"; exit 1 ;;
+        *) POSITIONAL+=("$1"); shift ;;
     esac
 done
 
-if [ ${#POSITIONAL[@]} -lt 1 ]; then
-    echo "Usage: ./deploy.sh [--fresh] [--reset] <server-ip>"
+# Validate mode
+case "$DEPLOY_MODE" in
+    full|shop|mail|web) ;;
+    *) echo "ERROR: Invalid mode '${DEPLOY_MODE}'. Use: full, shop, mail, web"; exit 1 ;;
+esac
+
+# Helper: check if current mode includes a stack
+mode_includes() {
+    local stack="$1"
+    case "$DEPLOY_MODE" in
+        full) return 0 ;;
+        "$stack") return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+if [ ${#POSITIONAL[@]} -lt 1 ] && [ "$CONFIGURE_ONLY" = false ]; then
+    echo "Usage: ./deploy.sh [options] <server-ip>"
     echo ""
     echo "Options:"
-    echo "  --fresh     Clear known_hosts for this IP (use after server rebuild)"
-    echo "  --reset     Clear deploy state and start all phases from scratch"
+    echo "  --mode <mode>       Deploy mode: full (default), shop, mail, web"
+    echo "  --restore           Run data restore after setup"
+    echo "  --fresh             Clear known_hosts for this IP"
+    echo "  --reset             Clear all deploy state"
+    echo "  --reset-mode <mode> Clear state for one mode only"
+    echo "  --configure         Run config wizard only, don't deploy"
+    echo "  --verbose           Show detailed output"
     echo ""
-    echo "Optional files (place next to deploy.sh):"
-    echo "  config.env  — site config + secrets (generated if missing)"
-    echo "  backup_key  — StorageBox SSH key (skipped if missing)"
+    echo "Modes:"
+    echo "  full  — shared infra + shop + mail + website"
+    echo "  shop  — shared infra + shop only"
+    echo "  mail  — shared infra + mail only"
+    echo "  web   — shared infra + website only"
     echo ""
     echo "State is saved in .deploy-state. Re-runs skip completed phases."
     exit 1
 fi
 
-SERVER_IP="${POSITIONAL[0]}"
-SERVER_IP="${SERVER_IP#*@}"
-
-if [ "$FRESH" = true ]; then
-    echo "Clearing known_hosts for ${SERVER_IP} (--fresh)..."
-    ssh-keygen -R "$SERVER_IP" 2>/dev/null || true
-    echo "Accepting new host key for ${SERVER_IP}..."
-    for user in root deploy; do
-        ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 \
-            ${SSH_KEY:+-i "$SSH_KEY"} \
-            "${user}@${SERVER_IP}" "echo ok" < /dev/null 2>/dev/null && break
-    done || true
-fi
-
-if [ "$RESET" = true ]; then
-    echo "Clearing deploy state (--reset)..."
-    rm -f "$STATE_FILE"
-fi
-
 # ── State tracking ────────────────────────────────────────
 phase_done() {
-    grep -qx "$1" "$STATE_FILE" 2>/dev/null
+    grep -qx "${DEPLOY_MODE}:$1" "$STATE_FILE" 2>/dev/null
 }
 
 mark_done() {
-    echo "$1" >> "$STATE_FILE"
+    echo "${DEPLOY_MODE}:$1" >> "$STATE_FILE"
     echo ""
-    echo "  >>> checkpoint: $1 done <<<"
+    echo "  >>> checkpoint: ${DEPLOY_MODE}:$1 done <<<"
     echo ""
 }
 
@@ -86,11 +101,87 @@ last_checkpoint() {
     fi
 }
 
+if [ "$RESET" = true ]; then
+    echo "Clearing all deploy state (--reset)..."
+    rm -f "$STATE_FILE"
+fi
+
+if [ -n "$RESET_MODE" ]; then
+    echo "Clearing state for mode '${RESET_MODE}'..."
+    if [ -f "$STATE_FILE" ]; then
+        sed -i "/^${RESET_MODE}:/d" "$STATE_FILE"
+    fi
+fi
+
+# ── Ensure config.env exists ────────────────────────────
+if [ ! -f "$CONFIG_FILE" ]; then
+    echo "No config.env found next to deploy.sh."
+    echo "Generating from template..."
+    cp "${REPO_DIR}/config.env.example" "$CONFIG_FILE"
+
+    generate_password() { openssl rand -base64 24 | tr -d '/+=' | head -c 32; }
+
+    sed -i "s/^MYSQL_ROOT_PASSWORD=changeme$/MYSQL_ROOT_PASSWORD=$(generate_password)/" "$CONFIG_FILE"
+    sed -i "s/^MYSQL_PASSWORD=changeme$/MYSQL_PASSWORD=$(generate_password)/" "$CONFIG_FILE"
+    sed -i "s/^MATOMO_SHOP_DATABASE_PASSWORD=changeme$/MATOMO_SHOP_DATABASE_PASSWORD=$(generate_password)/" "$CONFIG_FILE"
+    sed -i "s/^MATOMO_WEB_DATABASE_PASSWORD=changeme$/MATOMO_WEB_DATABASE_PASSWORD=$(generate_password)/" "$CONFIG_FILE"
+    sed -i "s/^RESTIC_PASSWORD=changeme$/RESTIC_PASSWORD=$(generate_password)/" "$CONFIG_FILE"
+
+    for key in AUTH_KEY SECURE_AUTH_KEY LOGGED_IN_KEY NONCE_KEY AUTH_SALT SECURE_AUTH_SALT LOGGED_IN_SALT NONCE_SALT; do
+        sed -i "s/^${key}=$/${key}=$(openssl rand -base64 48 | tr -d '/+=' | head -c 64)/" "$CONFIG_FILE"
+    done
+
+    # Set deploy mode in config
+    sed -i "s/^DEPLOY_MODE=.*$/DEPLOY_MODE=${DEPLOY_MODE}/" "$CONFIG_FILE"
+
+    echo ""
+    echo "Generated: ${CONFIG_FILE}"
+    echo ""
+    echo ">>> EDIT THIS FILE NOW <<<"
+    echo "At minimum, set:"
+    echo "  SITE_DOMAIN       — your shop domain"
+    echo "  TLS_EMAIL         — your email for Let's Encrypt"
+    echo "  SERVER_IP         — target server IP"
+    echo "  OLD_DOMAIN        — previous domain (for migration)"
+    echo ""
+    read -r -p "Press Enter when ready (or Ctrl+C to abort)..."
+fi
+
+if [ "$CONFIGURE_ONLY" = true ]; then
+    echo "Config file: ${CONFIG_FILE}"
+    echo "Done (--configure mode)."
+    exit 0
+fi
+
+source "$CONFIG_FILE"
+: "${SITE_DOMAIN:?SITE_DOMAIN not set in config.env}"
+: "${TLS_EMAIL:?TLS_EMAIL not set in config.env}"
+
+# Ensure DEPLOY_MODE in config.env matches CLI
+if [ "${DEPLOY_MODE}" != "${DEPLOY_MODE_FROM_FILE:-$DEPLOY_MODE}" ]; then
+    sed -i "s/^DEPLOY_MODE=.*$/DEPLOY_MODE=${DEPLOY_MODE}/" "$CONFIG_FILE"
+fi
+
+SERVER_IP="${POSITIONAL[0]:-${SERVER_IP:-}}"
+SERVER_IP="${SERVER_IP#*@}"
+: "${SERVER_IP:?SERVER_IP not set}"
+
 if [ -f "$STATE_FILE" ]; then
     echo "Last checkpoint: $(last_checkpoint)"
     echo "Completed: $(paste -sd', ' "$STATE_FILE")"
     echo ""
 fi
+
+echo ""
+echo "=== Dockbase Deploy ==="
+echo "Mode:    ${DEPLOY_MODE}"
+echo "Server:  ${SERVER_IP}"
+echo "Domain:  ${SITE_DOMAIN}"
+echo "Config:  ${CONFIG_FILE}"
+if mode_includes mail; then
+    echo "Mail:    ${MAIL_HOSTNAME:-not set}"
+fi
+echo ""
 
 # ── Detect SSH key ────────────────────────────────────────
 SSH_KEY=""
@@ -112,55 +203,16 @@ if [ -n "$SSH_KEY" ]; then
     echo "Using SSH key: ${SSH_KEY}"
 fi
 
-# ── Ensure config.env exists ────────────────────────────
-if [ ! -f "$CONFIG_FILE" ]; then
-    echo "No config.env found next to deploy.sh."
-    echo "Generating from template..."
-    cp "${REPO_DIR}/config.env.example" "$CONFIG_FILE"
-
-    generate_password() { openssl rand -base64 24 | tr -d '/+=' | head -c 32; }
-
-    sed -i "s/^MYSQL_ROOT_PASSWORD=changeme$/MYSQL_ROOT_PASSWORD=$(generate_password)/" "$CONFIG_FILE"
-    sed -i "s/^MYSQL_PASSWORD=changeme$/MYSQL_PASSWORD=$(generate_password)/" "$CONFIG_FILE"
-    sed -i "s/^MATOMO_DATABASE_PASSWORD=changeme$/MATOMO_DATABASE_PASSWORD=$(generate_password)/" "$CONFIG_FILE"
-    sed -i "s/^RESTIC_PASSWORD=changeme$/RESTIC_PASSWORD=$(generate_password)/" "$CONFIG_FILE"
-
-    for key in AUTH_KEY SECURE_AUTH_KEY LOGGED_IN_KEY NONCE_KEY AUTH_SALT SECURE_AUTH_SALT LOGGED_IN_SALT NONCE_SALT; do
-        sed -i "s/^${key}=$/${key}=$(openssl rand -base64 48 | tr -d '/+=' | head -c 64)/" "$CONFIG_FILE"
-    done
-
-    echo ""
-    echo "Generated: ${CONFIG_FILE}"
-    echo ""
-    echo ">>> EDIT THIS FILE NOW <<<"
-    echo "At minimum, set:"
-    echo "  SITE_DOMAIN       — your actual domain"
-    echo "  TLS_EMAIL         — your email for Let's Encrypt"
-    echo "  OLD_DOMAIN        — previous domain (for migration)"
-    echo ""
-    read -r -p "Press Enter when ready (or Ctrl+C to abort)..."
-
-    if grep -q "stoneshop.example.com" "$CONFIG_FILE"; then
-        echo ""
-        echo "WARNING: SITE_DOMAIN is still the default placeholder."
-        read -r -p "Continue anyway? [y/N] " yn
-        case "$yn" in
-            [Yy]*) ;;
-            *) echo "Aborted. Edit config.env and re-run."; exit 1 ;;
-        esac
-    fi
+if [ "$FRESH" = true ]; then
+    echo "Clearing known_hosts for ${SERVER_IP} (--fresh)..."
+    ssh-keygen -R "$SERVER_IP" 2>/dev/null || true
+    for user in root deploy; do
+        # shellcheck disable=SC2086
+        ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 \
+            ${SSH_KEY:+-i "$SSH_KEY"} \
+            "${user}@${SERVER_IP}" "echo ok" < /dev/null 2>/dev/null && break
+    done || true
 fi
-
-source "$CONFIG_FILE"
-: "${SITE_DOMAIN:?SITE_DOMAIN not set in config.env}"
-: "${TLS_EMAIL:?TLS_EMAIL not set in config.env}"
-
-echo ""
-echo "=== StoneShop Deploy ==="
-echo "Server:  ${SERVER_IP}"
-echo "Domain:  ${SITE_DOMAIN}"
-echo "Config:  ${CONFIG_FILE}"
-echo ""
 
 # ── Helpers ─────────────────────────────────────────────
 
@@ -176,7 +228,6 @@ ssh_as() {
     ssh $SSH_RUN "${user}@${SERVER_IP}" "$@"
 }
 
-# Upload a local script, then execute it
 run_script() {
     local user="$1" phase_name="$2" local_script="$3"
     shift 3
@@ -264,12 +315,14 @@ while [ -z "$READY_USER" ]; do
 done
 echo "SSH ready (${READY_USER})."
 
-# ── Phase 1: Harden ──────────────────────────────────────
+# ══════════════════════════════════════════════════════════
+#  Phase 1: Harden
+# ══════════════════════════════════════════════════════════
 if phase_done "harden"; then
     echo "=== Phase 1: Server Hardening — already done, skipping ==="
 elif [ "$READY_USER" = "root" ]; then
     echo "=== Phase 1: Server Hardening ==="
-    run_script root "Phase 1: Harden" "${SCRIPT_DIR}/harden.sh" "export DEBIAN_FRONTEND=noninteractive;"
+    run_script root "Phase 1: Harden" "${SCRIPT_DIR}/harden.sh" "export DEBIAN_FRONTEND=noninteractive DEPLOY_MODE=${DEPLOY_MODE};"
     mark_done "harden"
 
     echo ""
@@ -283,78 +336,226 @@ else
     mark_done "harden"
 fi
 
-# ── Phase 2: Setup ──────────────────────────────────────
-if phase_done "setup"; then
-    echo "=== Phase 2: Application Setup — already done, skipping ==="
+# ══════════════════════════════════════════════════════════
+#  Phase 2: Shared Setup
+# ══════════════════════════════════════════════════════════
+if phase_done "setup-shared"; then
+    echo "=== Phase 2: Shared Setup — already done, skipping ==="
 else
     echo ""
-    echo "=== Phase 2: Application Setup ==="
+    echo "=== Phase 2: Shared Setup ==="
 
-    # Upload config.env to /tmp staging area (setup.sh moves it after clone)
+    # Upload config files
     echo "Uploading config.env..."
-    upload_file "$CONFIG_FILE" "/tmp/stoneshop-config.env" deploy 600
+    upload_file "$CONFIG_FILE" "/tmp/dockbase-config.env" deploy 600
 
-    # Upload backup_key if present
     if [ -f "$BACKUP_KEY" ]; then
         echo "Uploading backup_key..."
-        upload_file "$BACKUP_KEY" "/tmp/stoneshop-backup_key" deploy 600
+        upload_file "$BACKUP_KEY" "/tmp/dockbase-backup_key" deploy 600
     else
-        echo "No backup_key found — skipping (import will be skipped too)."
+        echo "No backup_key found — skipping."
+    fi
+
+    # Upload domain configs if present
+    if [ -f "${REPO_DIR}/config/domains.conf" ]; then
+        echo "Uploading domains.conf..."
+        upload_file "${REPO_DIR}/config/domains.conf" "/tmp/dockbase-domains.conf" deploy 644
+    fi
+    if [ -f "${REPO_DIR}/config/mail-domains.conf" ]; then
+        echo "Uploading mail-domains.conf..."
+        upload_file "${REPO_DIR}/config/mail-domains.conf" "/tmp/dockbase-mail-domains.conf" deploy 644
     fi
 
     # Run setup.sh
     run_script deploy "Phase 2: Setup" "${SCRIPT_DIR}/setup.sh" "sudo DEBIAN_FRONTEND=noninteractive"
-    mark_done "setup"
+    mark_done "setup-shared"
 fi
 
-# ── Phase 3: Import ───────────────────────────────────
-if phase_done "import"; then
-    echo "=== Phase 3: Data Import — already done, skipping ==="
-elif [ -f "$BACKUP_KEY" ]; then
+# ══════════════════════════════════════════════════════════
+#  Phase 3: Shared Caddy
+# ══════════════════════════════════════════════════════════
+if phase_done "setup-caddy"; then
+    echo "=== Phase 3: Shared Caddy — already done, skipping ==="
+else
     echo ""
-    echo "=== Phase 3: Data Import ==="
-    # If data was already restored (marker on server), skip the slow 6GB download
-    IMPORT_FLAGS=""
-    # shellcheck disable=SC2086
-    if ssh $SSH_RUN "deploy@${SERVER_IP}" "test -f /opt/stoneshop/.restore-done" 2>/dev/null; then
-        IMPORT_FLAGS="--skip-restore"
-        echo "Data already restored — running search-replace only."
+    echo "=== Phase 3: Shared Caddy ==="
+    run_remote_cmd deploy "Phase 3: Caddy" "cd /opt/dockbase && sudo bash infra/setup-caddy.sh"
+    mark_done "setup-caddy"
+fi
+
+# ══════════════════════════════════════════════════════════
+#  Phase 4: Shop (if mode includes shop)
+# ══════════════════════════════════════════════════════════
+if mode_includes shop; then
+    if phase_done "setup-shop"; then
+        echo "=== Phase 4: Shop — already done, skipping ==="
+    else
+        echo ""
+        echo "=== Phase 4: Shop Stack ==="
+        run_remote_cmd deploy "Phase 4: Shop" "cd /opt/dockbase && sudo bash infra/setup-shop.sh"
+        mark_done "setup-shop"
     fi
-    run_remote_cmd deploy "Phase 3: Import" "cd /opt/stoneshop && git pull && sudo bash infra/import.sh $IMPORT_FLAGS"
-    mark_done "import"
+else
+    echo "=== Phase 4: Shop — skipped (mode: ${DEPLOY_MODE}) ==="
+fi
+
+# ══════════════════════════════════════════════════════════
+#  Phase 5: Mailcow (if mode includes mail)
+# ══════════════════════════════════════════════════════════
+if mode_includes mail; then
+    if phase_done "setup-mailcow"; then
+        echo "=== Phase 5: Mailcow — already done, skipping ==="
+    else
+        echo ""
+        echo "=== Phase 5: Mailcow ==="
+        run_remote_cmd deploy "Phase 5: Mailcow" "cd /opt/dockbase && sudo bash infra/setup-mailcow.sh"
+        mark_done "setup-mailcow"
+    fi
+else
+    echo "=== Phase 5: Mailcow — skipped (mode: ${DEPLOY_MODE}) ==="
+fi
+
+# ══════════════════════════════════════════════════════════
+#  Phase 6: Website (if mode includes web)
+# ══════════════════════════════════════════════════════════
+if mode_includes web; then
+    if phase_done "setup-website"; then
+        echo "=== Phase 6: Website — already done, skipping ==="
+    else
+        echo ""
+        echo "=== Phase 6: Website ==="
+        run_remote_cmd deploy "Phase 6: Website" "cd /opt/dockbase && sudo bash infra/setup-website.sh"
+        mark_done "setup-website"
+    fi
+else
+    echo "=== Phase 6: Website — skipped (mode: ${DEPLOY_MODE}) ==="
+fi
+
+# ══════════════════════════════════════════════════════════
+#  Phase 7: Backup & Cron
+# ══════════════════════════════════════════════════════════
+if phase_done "backup-cron"; then
+    echo "=== Phase 7: Backup & Cron — already done, skipping ==="
 else
     echo ""
-    echo "Skipping data import (no backup_key)."
-    echo "To import later:"
-    echo "  scp backup_key deploy@${SERVER_IP}:/opt/stoneshop/config/backup/backup_key"
-    echo "  ssh deploy@${SERVER_IP} 'cd /opt/stoneshop && sudo bash infra/import.sh'"
+    echo "=== Phase 7: Backup & Cron ==="
+
+    # Build cron entries based on mode
+    CRON_ENTRIES=""
+    if mode_includes shop; then
+        CRON_ENTRIES+="# Dockbase: WordPress auto-update (04:00 daily)\n"
+        CRON_ENTRIES+="0 4 * * * /opt/dockbase/scripts/wp-update.sh >> /opt/dockbase/logs/wp-updates.log 2>&1\n"
+    fi
+    CRON_ENTRIES+="# Dockbase: Backup (04:30 daily)\n"
+    CRON_ENTRIES+="30 4 * * * /opt/dockbase/config/backup/scripts/backup.sh\n"
+
+    if mode_includes mail; then
+        CRON_ENTRIES+="# Dockbase: Cert sync for Mailcow (weekly)\n"
+        CRON_ENTRIES+="0 5 * * 1 /opt/dockbase/infra/sync-certs.sh >> /opt/dockbase/logs/cert-sync.log 2>&1\n"
+    fi
+
+    # shellcheck disable=SC2086
+    ssh_as deploy "
+        CRON_TMP=\$(mktemp)
+        chmod 644 \"\$CRON_TMP\"
+        crontab -l 2>/dev/null | grep -v '/opt/dockbase/' | grep -v '/opt/stoneshop/' > \"\$CRON_TMP\" || true
+        printf '${CRON_ENTRIES}' >> \"\$CRON_TMP\"
+        crontab \"\$CRON_TMP\"
+        rm -f \"\$CRON_TMP\"
+        echo 'Cron jobs installed.'
+    "
+    mark_done "backup-cron"
 fi
 
-# ── Verification ────────────────────────────────────────
-echo ""
-echo "=== Verification ==="
-ssh_as deploy "cd /opt/stoneshop && sudo docker compose ps"
-
-echo ""
-echo "Checking HTTPS (may take a moment for TLS cert)..."
-sleep 5
-if curl -sSf -o /dev/null -w "%{http_code}" --connect-timeout 10 "https://${SITE_DOMAIN}" 2>/dev/null; then
-    echo "  https://${SITE_DOMAIN} — OK"
+# ══════════════════════════════════════════════════════════
+#  Phase 8: Restore (only with --restore)
+# ══════════════════════════════════════════════════════════
+if [ "$DO_RESTORE" = true ]; then
+    if phase_done "restore"; then
+        echo "=== Phase 8: Restore — already done, skipping ==="
+    elif [ -f "$BACKUP_KEY" ]; then
+        echo ""
+        echo "=== Phase 8: Data Restore ==="
+        IMPORT_FLAGS=""
+        # shellcheck disable=SC2086
+        if ssh $SSH_RUN "deploy@${SERVER_IP}" "test -f /opt/dockbase/.restore-done" 2>/dev/null; then
+            IMPORT_FLAGS="--skip-restore"
+            echo "Data already restored — running search-replace only."
+        fi
+        run_remote_cmd deploy "Phase 8: Restore" "cd /opt/dockbase && git pull && sudo bash infra/import.sh $IMPORT_FLAGS"
+        mark_done "restore"
+    else
+        echo ""
+        echo "Skipping restore (no backup_key)."
+        echo "To restore later:"
+        echo "  scp backup_key deploy@${SERVER_IP}:/opt/dockbase/config/backup/backup_key"
+        echo "  ssh deploy@${SERVER_IP} 'cd /opt/dockbase && sudo bash infra/import.sh'"
+    fi
 else
-    echo "  https://${SITE_DOMAIN} — not yet reachable (DNS propagation or TLS provisioning)"
+    echo "=== Phase 8: Restore — skipped (use --restore to enable) ==="
 fi
 
-mark_done "verified"
+# ══════════════════════════════════════════════════════════
+#  Phase 9: Verify
+# ══════════════════════════════════════════════════════════
+echo ""
+echo "=== Phase 9: Verification ==="
+
+# Show running containers
+ssh_as deploy "cd /opt/dockbase && sudo docker compose ps 2>/dev/null; sudo docker compose -f docker-compose.shared.yml ps 2>/dev/null" || true
+
+# Memory usage
+echo ""
+echo "=== Memory Usage ==="
+ssh_as deploy "free -h; echo ''; sudo docker stats --no-stream --format 'table {{.Name}}\t{{.MemUsage}}' 2>/dev/null | sort -k2 -h" || true
+
+# HTTPS checks
+echo ""
+echo "Checking HTTPS endpoints..."
+sleep 3
+
+if mode_includes shop; then
+    if curl -sSf -o /dev/null -w "%{http_code}" --connect-timeout 10 "https://${SITE_DOMAIN}" 2>/dev/null; then
+        echo "  https://${SITE_DOMAIN} — OK"
+    else
+        echo "  https://${SITE_DOMAIN} — not yet reachable"
+    fi
+fi
+
+if mode_includes mail && [ -n "${MAIL_HOSTNAME:-}" ]; then
+    if curl -sSf -o /dev/null -w "%{http_code}" --connect-timeout 10 "https://${MAIL_HOSTNAME}" 2>/dev/null; then
+        echo "  https://${MAIL_HOSTNAME} — OK"
+    else
+        echo "  https://${MAIL_HOSTNAME} — not yet reachable"
+    fi
+fi
+
+mark_done "verify"
+
+# ── Summary ────────────────────────────────────────────
+echo ""
+echo "========================================="
+echo "  Dockbase Deploy Complete!"
+echo "========================================="
+echo ""
+echo "  Mode:    ${DEPLOY_MODE}"
+echo "  Server:  ${SERVER_IP}"
+
+if mode_includes shop; then
+    echo "  Shop:    https://${SITE_DOMAIN}"
+    echo "  Matomo:  https://matomo.${SITE_DOMAIN%%.*}.${SITE_DOMAIN#*.}"
+fi
+
+if mode_includes mail; then
+    echo "  Mail:    https://${MAIL_HOSTNAME:-}"
+fi
+
+if mode_includes web; then
+    echo "  Website: (see config/domains.conf for website domains)"
+fi
 
 echo ""
-echo "========================================="
-echo "  Deploy complete!"
-echo "========================================="
-echo ""
-echo "  Site:    https://${SITE_DOMAIN}"
-echo "  Matomo:  https://matomo.${SITE_DOMAIN}"
 echo "  SSH:     ssh deploy@${SERVER_IP}"
-echo ""
 echo "  Secrets: ${CONFIG_FILE}"
 echo "  State:   ${STATE_FILE}"
 echo "  Keep both files safe!"

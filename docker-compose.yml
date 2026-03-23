@@ -1,7 +1,7 @@
 services:
   mariadb:
     image: mariadb:11.8
-    container_name: stoneshop_mariadb
+    container_name: dockbase_mariadb
     restart: unless-stopped
     env_file: ./config.env
     environment:
@@ -29,7 +29,7 @@ services:
 
   keydb:
     image: eqalpha/keydb:latest
-    container_name: stoneshop_keydb
+    container_name: dockbase_keydb
     restart: unless-stopped
     command: keydb-server --server-threads 2 --maxmemory 512mb --maxmemory-policy allkeys-lru
     volumes:
@@ -47,22 +47,22 @@ services:
       timeout: 5s
       retries: 5
 
-  matomo:
+  matomo-shop:
     image: matomo:latest
-    container_name: stoneshop_matomo
+    container_name: dockbase_matomo_shop
     restart: unless-stopped
     env_file: ./config.env
     environment:
       MATOMO_DATABASE_HOST: mariadb
       MATOMO_DATABASE_ADAPTER: mysql
       MATOMO_DATABASE_TABLES_PREFIX: matomo_
-      MATOMO_DATABASE_USERNAME: matomo
-      MATOMO_DATABASE_PASSWORD: ${MATOMO_DATABASE_PASSWORD}
-      MATOMO_DATABASE_DBNAME: matomo
+      MATOMO_DATABASE_USERNAME: matomo_shop
+      MATOMO_DATABASE_PASSWORD: ${MATOMO_SHOP_DATABASE_PASSWORD}
+      MATOMO_DATABASE_DBNAME: matomo_shop
     volumes:
-      - matomo_data:/var/www/html
+      - matomo_shop_data:/var/www/html
     networks:
-      - frontend
+      - dockbase-proxy
       - backend
     depends_on:
       mariadb:
@@ -79,34 +79,43 @@ services:
       retries: 3
       start_period: 60s
 
-  crowdsec:
-    image: crowdsecurity/crowdsec:latest
-    container_name: stoneshop_crowdsec
+  matomo-web:
+    image: matomo:latest
+    container_name: dockbase_matomo_web
     restart: unless-stopped
+    env_file: ./config.env
     environment:
-      COLLECTIONS: "crowdsecurity/caddy crowdsecurity/http-cve crowdsecurity/wordpress"
+      MATOMO_DATABASE_HOST: mariadb
+      MATOMO_DATABASE_ADAPTER: mysql
+      MATOMO_DATABASE_TABLES_PREFIX: matomo_
+      MATOMO_DATABASE_USERNAME: matomo_web
+      MATOMO_DATABASE_PASSWORD: ${MATOMO_WEB_DATABASE_PASSWORD}
+      MATOMO_DATABASE_DBNAME: matomo_web
     volumes:
-      - crowdsec_data:/var/lib/crowdsec/data
-      - ./logs:/var/log/caddy:ro
+      - matomo_web_data:/var/www/html
     networks:
-      - frontend
+      - dockbase-proxy
+      - backend
+    depends_on:
+      mariadb:
+        condition: service_healthy
     deploy:
       resources:
         limits:
-          memory: 256M
+          memory: 512M
           cpus: '0.5'
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/matomo.php"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
 
   frankenphp:
     build: .
-    container_name: stoneshop_frankenphp
+    container_name: dockbase_frankenphp
     restart: unless-stopped
     user: "33:1100"
-    cap_add:
-      - NET_BIND_SERVICE
-    ports:
-      - "0.0.0.0:80:80"
-      - "0.0.0.0:443:443"
-      - "0.0.0.0:443:443/udp"
     env_file: ./config.env
     environment:
       DB_NAME: stoneshop
@@ -119,8 +128,6 @@ services:
       WP_REDIS_HOST: keydb
       WP_REDIS_PORT: 6379
       SITE_DOMAIN: ${SITE_DOMAIN}
-      TLS_EMAIL: ${TLS_EMAIL}
-      SERVER_NAME: ${SITE_DOMAIN}
       AUTH_KEY: ${AUTH_KEY}
       SECURE_AUTH_KEY: ${SECURE_AUTH_KEY}
       LOGGED_IN_KEY: ${LOGGED_IN_KEY}
@@ -135,17 +142,15 @@ services:
       - ./web/app/languages:/app/web/app/languages
       - ./web/app/uploads:/app/web/app/uploads
       - plugins:/app/web/app/plugins
-      - caddy_data:/data
-      - caddy_config:/config
-      - ./config/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./config/caddy/frankenphp.Caddyfile:/etc/caddy/Caddyfile:ro
       - ./config/php/wordfence.ini:/usr/local/etc/php/conf.d/wordfence.ini:ro
       - ./config/php/uploads.ini:/usr/local/etc/php/conf.d/uploads.ini:ro
       - ./config/php/wordfence-waf.php:/app/web/wp/wordfence-waf.php:ro
       - ./config/application.php:/app/config/application.php:ro
-      - ./logs:/var/log/caddy
+      - ./logs/frankenphp:/var/log/caddy
       - ./web/.well-known:/app/web/.well-known:ro
     networks:
-      - frontend
+      - dockbase-proxy
       - backend
     depends_on:
       mariadb:
@@ -160,15 +165,15 @@ services:
     security_opt:
       - no-new-privileges:true
     healthcheck:
-      test: ["CMD", "curl", "-f", "-o", "/dev/null", "-s", "http://localhost/"]
+      test: ["CMD", "curl", "-f", "-o", "/dev/null", "-s", "http://localhost:8080/"]
       interval: 30s
       timeout: 10s
       retries: 5
       start_period: 120s
 
 networks:
-  frontend:
-    driver: bridge
+  dockbase-proxy:
+    external: true
   backend:
     driver: bridge
     internal: true
@@ -176,8 +181,6 @@ networks:
 volumes:
   mariadb_data:
   keydb_data:
-  matomo_data:
-  crowdsec_data:
+  matomo_shop_data:
+  matomo_web_data:
   plugins:
-  caddy_data:
-  caddy_config:

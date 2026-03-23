@@ -74,7 +74,7 @@ Config::define('NONCE_SALT', env('NONCE_SALT'));
  */
 Config::define('WP_REDIS_HOST', env('WP_REDIS_HOST') ?: 'keydb');
 Config::define('WP_REDIS_PORT', env('WP_REDIS_PORT') ?: 6379);
-Config::define('WP_REDIS_PREFIX', 'stoneshop_');
+Config::define('WP_REDIS_PREFIX', 'dockbase_');
 
 /**
  * Custom Settings
