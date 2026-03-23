@@ -17,10 +17,16 @@ MAILCOW_SSL_DIR="${MAILCOW_DIR}/data/assets/ssl"
 
 # Caddy stores certs in its data volume
 # The exact path depends on the ACME provider; default is Let's Encrypt
-CADDY_DATA_DIR=$(docker volume inspect caddy_shared_data --format '{{ .Mountpoint }}' 2>/dev/null || echo "")
+# Try both possible volume names (with and without compose project prefix)
+CADDY_DATA_DIR=""
+for vol_name in dockbase_caddy_shared_data caddy_shared_data; do
+    CADDY_DATA_DIR=$(docker volume inspect "$vol_name" --format '{{ .Mountpoint }}' 2>/dev/null || echo "")
+    [ -n "$CADDY_DATA_DIR" ] && break
+done
 
 if [ -z "$CADDY_DATA_DIR" ]; then
-    log_error "Could not find caddy_shared_data volume. Is shared Caddy running?"
+    log_error "Could not find Caddy data volume. Is shared Caddy running?"
+    log_error "Looked for: dockbase_caddy_shared_data, caddy_shared_data"
     exit 1
 fi
 
