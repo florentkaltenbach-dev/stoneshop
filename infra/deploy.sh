@@ -412,7 +412,7 @@ fi
 # ── Sync latest code to server ────────────────────────────
 echo ""
 echo "Syncing latest code to server..."
-ssh_as deploy "cd /opt/dockbase && git pull --ff-only" || true
+ssh_as deploy "cd /opt/dockbase && git checkout -- . 2>/dev/null; git pull --ff-only" || true
 
 # ══════════════════════════════════════════════════════════
 #  Phase 3: Shared Caddy

@@ -63,7 +63,8 @@ fi
 echo "Cloning repository to ${INSTALL_DIR}..."
 if [ -d "$INSTALL_DIR/.git" ]; then
     echo "Repository already exists at ${INSTALL_DIR}, pulling latest..."
-    sudo -u deploy git -C "$INSTALL_DIR" pull
+    sudo -u deploy git -C "$INSTALL_DIR" checkout -- . 2>/dev/null || true
+    sudo -u deploy git -C "$INSTALL_DIR" pull --ff-only
 elif [ -d "$INSTALL_DIR" ]; then
     echo "Directory exists but is not a git repo — removing stale directory..."
     rm -rf "$INSTALL_DIR"
