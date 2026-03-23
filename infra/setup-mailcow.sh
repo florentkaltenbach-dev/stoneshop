@@ -52,12 +52,16 @@ if [ -f "$CONF" ]; then
     fi
 else
     # Create conf from scratch (no interactive generate_config.sh needed)
+    DBPASS_GEN=$(openssl rand -base64 24 | tr -d '/+=' | head -c 32)
+    DBROOT_GEN=$(openssl rand -base64 24 | tr -d '/+=' | head -c 32)
+    REDIS_PW=$(openssl rand -base64 24 | tr -d '/+=' | head -c 32)
     cat > "$CONF" <<MCEOF
 MAILCOW_HOSTNAME=${MAIL_HOSTNAME}
 DBNAME=mailcow
 DBUSER=mailcow
-DBPASS=$(openssl rand -base64 24 | tr -d '/+=' | head -c 32)
-DBROOT=$(openssl rand -base64 24 | tr -d '/+=' | head -c 32)
+DBPASS=${DBPASS_GEN}
+DBROOT=${DBROOT_GEN}
+REDISPASS=${REDIS_PW}
 HTTP_BIND=127.0.0.1
 HTTP_PORT=8880
 HTTPS_BIND=127.0.0.1
@@ -73,6 +77,16 @@ SKIP_LETS_ENCRYPT=y
 SKIP_SOLR=y
 COMPOSE_PROJECT_NAME=mailcowdockerized
 MCEOF
+fi
+
+# ── Generate placeholder SSL cert (until Caddy certs are synced) ──
+SSL_DIR="${MAILCOW_DIR}/data/assets/ssl"
+if [ ! -f "${SSL_DIR}/cert.pem" ] || [ ! -f "${SSL_DIR}/key.pem" ]; then
+    log_info "Generating self-signed placeholder cert for Mailcow nginx..."
+    mkdir -p "$SSL_DIR"
+    openssl req -x509 -newkey rsa:2048 -keyout "${SSL_DIR}/key.pem" \
+        -out "${SSL_DIR}/cert.pem" -days 1 -nodes \
+        -subj "/CN=${MAIL_HOSTNAME}" 2>/dev/null
 fi
 
 log_info "mailcow.conf configured (web on 127.0.0.1:8880/8443, TLS skipped)."
