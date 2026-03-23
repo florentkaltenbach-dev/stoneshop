@@ -201,11 +201,14 @@ for candidate in "${SCRIPT_DIR}/id_ed25519_hetzner" \
     fi
 done
 
-SSH_PROBE="-o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 -o BatchMode=yes"
-SSH_RUN="-o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 -o BatchMode=yes"
+# Build SSH option arrays (arrays handle paths with spaces correctly)
+SSH_OPTS_PROBE=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 -o BatchMode=yes)
+SSH_OPTS_RUN=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 -o BatchMode=yes)
+SCP_OPTS=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=10)
 if [ -n "$SSH_KEY" ]; then
-    SSH_PROBE="${SSH_PROBE} -i ${SSH_KEY}"
-    SSH_RUN="${SSH_RUN} -i ${SSH_KEY}"
+    SSH_OPTS_PROBE+=(-i "$SSH_KEY")
+    SSH_OPTS_RUN+=(-i "$SSH_KEY")
+    SCP_OPTS+=(-i "$SSH_KEY")
     echo "Using SSH key: ${SSH_KEY}"
 fi
 
@@ -218,14 +221,12 @@ fi
 
 ssh_probe() {
     local user="$1"; shift
-    # shellcheck disable=SC2086
-    ssh $SSH_PROBE "${user}@${SERVER_IP}" "$@" < /dev/null
+    ssh "${SSH_OPTS_PROBE[@]}" "${user}@${SERVER_IP}" "$@" < /dev/null
 }
 
 ssh_as() {
     local user="$1"; shift
-    # shellcheck disable=SC2086
-    ssh $SSH_RUN "${user}@${SERVER_IP}" "$@"
+    ssh "${SSH_OPTS_RUN[@]}" "${user}@${SERVER_IP}" "$@"
 }
 
 run_script() {
@@ -234,29 +235,23 @@ run_script() {
     local env_prefix="${*:-}"
 
     echo "[${phase_name}] Uploading $(basename "$local_script")..."
-    local scp_opts="-o StrictHostKeyChecking=accept-new -o ConnectTimeout=10"
-    [ -n "$SSH_KEY" ] && scp_opts="${scp_opts} -i ${SSH_KEY}"
 
     # Upload lib/ directory so scripts can source common.sh
     local script_parent
     script_parent="$(dirname "$local_script")"
     if [ -d "${script_parent}/lib" ]; then
-        # shellcheck disable=SC2086
-        ssh $SSH_RUN "${user}@${SERVER_IP}" "mkdir -p /tmp/lib"
+        ssh "${SSH_OPTS_RUN[@]}" "${user}@${SERVER_IP}" "mkdir -p /tmp/lib"
         for lib_file in "${script_parent}"/lib/*.sh; do
             [ -f "$lib_file" ] || continue
-            # shellcheck disable=SC2086
-            scp $scp_opts "$lib_file" "${user}@${SERVER_IP}:/tmp/lib/$(basename "$lib_file")"
+            scp "${SCP_OPTS[@]}" "$lib_file" "${user}@${SERVER_IP}:/tmp/lib/$(basename "$lib_file")"
         done
     fi
 
-    # shellcheck disable=SC2086
-    scp $scp_opts "$local_script" "${user}@${SERVER_IP}:/tmp/_phase_script.sh"
+    scp "${SCP_OPTS[@]}" "$local_script" "${user}@${SERVER_IP}:/tmp/_phase_script.sh"
 
     echo "[${phase_name}] Running..."
     local rc=0
-    # shellcheck disable=SC2086
-    ssh $SSH_RUN "${user}@${SERVER_IP}" "${env_prefix:+$env_prefix }bash /tmp/_phase_script.sh; _rc=\$?; rm -rf /tmp/_phase_script.sh /tmp/lib; exit \$_rc" || rc=$?
+    ssh "${SSH_OPTS_RUN[@]}" "${user}@${SERVER_IP}" "${env_prefix:+$env_prefix }bash /tmp/_phase_script.sh; _rc=\$?; rm -rf /tmp/_phase_script.sh /tmp/lib; exit \$_rc" || rc=$?
 
     if [ "$rc" -ne 0 ]; then
         echo ""
@@ -271,8 +266,7 @@ run_remote_cmd() {
     local user="$1" phase_name="$2"; shift 2
     echo "[${phase_name}] Running..."
     local rc=0
-    # shellcheck disable=SC2086
-    ssh $SSH_RUN "${user}@${SERVER_IP}" "$@" || rc=$?
+    ssh "${SSH_OPTS_RUN[@]}" "${user}@${SERVER_IP}" "$@" || rc=$?
 
     if [ "$rc" -ne 0 ]; then
         echo ""
@@ -309,10 +303,7 @@ wait_for_ssh() {
 
 upload_file() {
     local src="$1" dest="$2" user="${3:-deploy}" mode="${4:-644}"
-    local scp_opts="-o StrictHostKeyChecking=accept-new -o ConnectTimeout=10"
-    [ -n "$SSH_KEY" ] && scp_opts="${scp_opts} -i ${SSH_KEY}"
-    # shellcheck disable=SC2086
-    scp $scp_opts "$src" "${user}@${SERVER_IP}:/tmp/_upload"
+    scp "${SCP_OPTS[@]}" "$src" "${user}@${SERVER_IP}:/tmp/_upload"
     ssh_as "$user" "sudo mv /tmp/_upload ${dest} && sudo chmod ${mode} ${dest}"
 }
 
@@ -520,8 +511,7 @@ if [ "$DO_RESTORE" = true ]; then
         echo ""
         echo "=== Phase 8: Data Restore ==="
         IMPORT_FLAGS=""
-        # shellcheck disable=SC2086
-        if ssh $SSH_RUN "deploy@${SERVER_IP}" "test -f /opt/dockbase/.restore-done" 2>/dev/null; then
+        if ssh "${SSH_OPTS_RUN[@]}" "deploy@${SERVER_IP}" "test -f /opt/dockbase/.restore-done" 2>/dev/null; then
             IMPORT_FLAGS="--skip-restore"
             echo "Data already restored — running search-replace only."
         fi
