@@ -444,6 +444,15 @@ if mode_includes mail; then
         echo "=== Phase 5: Mailcow ==="
         run_remote_cmd deploy "Phase 5: Mailcow" "cd /opt/dockbase && sudo bash infra/setup-mailcow.sh"
         mark_done "setup-mailcow"
+
+        # Sync Caddy TLS certs into Mailcow (for SMTP/IMAP TLS)
+        echo ""
+        echo "=== Phase 5b: Cert Sync ==="
+        echo "Waiting for Caddy to provision cert for ${MAIL_HOSTNAME}..."
+        sleep 10
+        run_remote_cmd deploy "Phase 5b: Cert Sync" "cd /opt/dockbase && sudo bash infra/sync-certs.sh" || {
+            echo "  Cert sync failed — can be run later with: sudo bash /opt/dockbase/infra/sync-certs.sh"
+        }
     fi
 else
     echo "=== Phase 5: Mailcow — skipped (mode: ${DEPLOY_MODE}) ==="

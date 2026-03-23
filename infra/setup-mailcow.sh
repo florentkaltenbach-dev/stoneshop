@@ -126,14 +126,21 @@ else
         MAILCOW_DBPASS=$(grep "^DBPASS=" "$CONF" | cut -d= -f2-)
         API_KEY=$(docker exec "$(docker ps -qf name=mysql-mailcow)" \
             mysql -u mailcow -p"${MAILCOW_DBPASS}" mailcow \
-            -se "SELECT api_key FROM api WHERE active='1' AND allow_from='' LIMIT 1" 2>/dev/null || true)
+            -se "SELECT api_key FROM api WHERE active='1' LIMIT 1" 2>/dev/null || true)
+
+        # Ensure skip_ip_check is set for any existing key
+        if [ -n "$API_KEY" ]; then
+            docker exec "$(docker ps -qf name=mysql-mailcow)" \
+                mysql -u mailcow -p"${MAILCOW_DBPASS}" mailcow \
+                -e "UPDATE api SET skip_ip_check='1' WHERE api_key='${API_KEY}';" 2>/dev/null || true
+        fi
 
         if [ -z "$API_KEY" ]; then
             log_info "No API key found — creating one..."
             API_KEY=$(openssl rand -hex 32)
             docker exec "$(docker ps -qf name=mysql-mailcow)" \
                 mysql -u mailcow -p"${MAILCOW_DBPASS}" mailcow \
-                -e "INSERT INTO api (api_key, active, allow_from, created, modified, access) VALUES ('${API_KEY}', '1', '', NOW(), NOW(), 'rw') ON DUPLICATE KEY UPDATE active='1';" 2>/dev/null || {
+                -e "INSERT INTO api (api_key, active, allow_from, skip_ip_check, created, modified, access) VALUES ('${API_KEY}', '1', '', '1', NOW(), NOW(), 'rw') ON DUPLICATE KEY UPDATE active='1', skip_ip_check='1';" 2>/dev/null || {
                     log_warn "Could not create API key in Mailcow DB."
                     API_KEY=""
                 }
