@@ -77,16 +77,27 @@ log_info "=== Dockbase Data Import (mode: ${DEPLOY_MODE}) ==="
 wait_healthy "${INSTALL_DIR}" 300
 
 # ── Detect snapshot format ───────────────────────────────
+# If both new-format and legacy tags exist, pick whichever has the newer snapshot.
 USE_LEGACY=false
-if ! tag_exists "shop-db"; then
-    if tag_exists "db"; then
+HAS_NEW=$(tag_exists "shop-db" && echo true || echo false)
+HAS_LEGACY=$(tag_exists "db" && echo true || echo false)
+
+if [ "$HAS_NEW" = true ] && [ "$HAS_LEGACY" = true ]; then
+    NEW_TS=$(run_restic snapshots --tag shop-db --json 2>/dev/null | jq -r '.[-1].time // empty' 2>/dev/null || echo "")
+    LEGACY_TS=$(run_restic snapshots --tag db --json 2>/dev/null | jq -r '.[-1].time // empty' 2>/dev/null || echo "")
+    if [[ "$LEGACY_TS" > "$NEW_TS" ]]; then
         USE_LEGACY=true
-        log_info "New-format tags not found. Using legacy tags for migration restore."
+        log_info "Both tag formats exist. Legacy 'db' is newer — using legacy tags."
     else
-        log_info "No backup snapshots found at all."
+        log_info "Both tag formats exist. New-format 'shop-db' is newer — using new-format tags."
     fi
-else
+elif [ "$HAS_NEW" = true ]; then
     log_info "Using new-format backup tags."
+elif [ "$HAS_LEGACY" = true ]; then
+    USE_LEGACY=true
+    log_info "New-format tags not found. Using legacy tags for migration restore."
+else
+    log_info "No backup snapshots found at all."
 fi
 
 if [ "$SKIP_RESTORE" = true ]; then

@@ -31,6 +31,7 @@ while IFS= read -r line; do
     domain=$(echo "$line" | awk '{print $1}')
     backend=$(echo "$line" | awk '{print $2}')
     [ -z "$domain" ] || [ -z "$backend" ] && continue
+    # Redirects are grouped by target: redirect:fraefel.de
     BACKEND_DOMAINS["$backend"]+="${domain} "
 done < "$DOMAINS_FILE"
 
@@ -139,6 +140,17 @@ LOG_BLOCK='    log {
         echo "}"
         echo ""
     fi
+
+    # ── Redirect backends ─────────────────────────────────
+    for key in "${!BACKEND_DOMAINS[@]}"; do
+        [[ "$key" == redirect:* ]] || continue
+        target="${key#redirect:}"
+        domains=$(echo "${BACKEND_DOMAINS[$key]}" | xargs | tr ' ' ', ')
+        echo "${domains} {"
+        echo "    redir https://${target}{uri} permanent"
+        echo "}"
+        echo ""
+    done
 
 } > "$OUTPUT_FILE"
 

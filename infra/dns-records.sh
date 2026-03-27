@@ -10,6 +10,7 @@ REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 DOMAINS_FILE="${REPO_DIR}/config/domains.conf"
 MAIL_DOMAINS_FILE="${REPO_DIR}/config/mail-domains.conf"
 CONFIG_FILE="${REPO_DIR}/config.env"
+[ -f "$CONFIG_FILE" ] || CONFIG_FILE="${SCRIPT_DIR}/config.env"
 
 # Load config
 SERVER_IP=""
@@ -30,7 +31,12 @@ if [ -f "$DOMAINS_FILE" ]; then
         domain=$(echo "$line" | awk '{print $1}')
         backend=$(echo "$line" | awk '{print $2}')
         [ -z "$domain" ] && continue
-        WEB_DOMAINS["$domain"]="$backend"
+        # Normalize redirect:target for display
+        if [[ "$backend" == redirect:* ]]; then
+            WEB_DOMAINS["$domain"]="redirect → ${backend#redirect:}"
+        else
+            WEB_DOMAINS["$domain"]="$backend"
+        fi
     done < "$DOMAINS_FILE"
 fi
 
