@@ -158,10 +158,13 @@ else
             DB_TMP=$(make_tmp)
             run_restic --retry-lock 5m restore latest --tag shop-db --target "$DB_TMP"
             SHOP_SQL=$(find "$DB_TMP" -name "stoneshop.sql" | head -1)
-            if [ -n "$SHOP_SQL" ]; then
-                docker exec -i "$DB_CONTAINER" mariadb -u root -p"$MYSQL_ROOT_PASSWORD" stoneshop < "$SHOP_SQL"
-                log_info "WordPress database imported."
+            if [ -z "$SHOP_SQL" ]; then
+                log_error "shop-db snapshot restored but stoneshop.sql not found in ${DB_TMP}"
+                log_error "Contents: $(ls -la "$DB_TMP" 2>/dev/null || true)"
+                exit 1
             fi
+            docker exec -i "$DB_CONTAINER" mariadb -u root -p"$MYSQL_ROOT_PASSWORD" stoneshop < "$SHOP_SQL"
+            log_info "WordPress database imported."
 
             log_info "Restoring shop-files..."
             FILES_TMP=$(make_tmp)
@@ -257,19 +260,23 @@ fi
 # ── Domain Search-Replace (shop only) ────────────────────
 if mode_includes shop; then
     if [ -n "${OLD_DOMAIN:-}" ] && [ -n "${SITE_DOMAIN:-}" ] && [ "$OLD_DOMAIN" != "$SITE_DOMAIN" ]; then
-        log_info "Running WordPress search-replace: ${OLD_DOMAIN} -> ${SITE_DOMAIN}..."
-        docker exec "$CONTAINER" wp --path=/app/web/wp search-replace \
-            "https://$OLD_DOMAIN" "https://$SITE_DOMAIN" --all-tables --precise
+        if ! docker exec "$CONTAINER" wp --path=/app/web/wp core is-installed 2>/dev/null; then
+            log_warn "WP core not installed — skipping search-replace (likely no DB was restored)."
+        else
+            log_info "Running WordPress search-replace: ${OLD_DOMAIN} -> ${SITE_DOMAIN}..."
+            docker exec "$CONTAINER" wp --path=/app/web/wp search-replace \
+                "https://$OLD_DOMAIN" "https://$SITE_DOMAIN" --all-tables --precise
 
-        docker exec "$CONTAINER" wp --path=/app/web/wp search-replace \
-            "$OLD_DOMAIN" "$SITE_DOMAIN" --all-tables --precise
+            docker exec "$CONTAINER" wp --path=/app/web/wp search-replace \
+                "$OLD_DOMAIN" "$SITE_DOMAIN" --all-tables --precise
 
-        log_info "Updating Matomo shop site URL..."
-        docker exec -i "$DB_CONTAINER" mariadb -u root -p"$MYSQL_ROOT_PASSWORD" matomo_shop <<SQLEOF
+            log_info "Updating Matomo shop site URL..."
+            docker exec -i "$DB_CONTAINER" mariadb -u root -p"$MYSQL_ROOT_PASSWORD" matomo_shop <<SQLEOF
 UPDATE matomo_site SET main_url='https://${SITE_DOMAIN}' WHERE idsite=1;
 UPDATE matomo_site SET currency='EUR' WHERE idsite=1;
 SQLEOF
-        log_info "Domain migration complete."
+            log_info "Domain migration complete."
+        fi
     else
         log_info "No domain change detected. Skipping search-replace."
     fi
