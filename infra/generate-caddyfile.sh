@@ -10,6 +10,7 @@ REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 DOMAINS_FILE="${REPO_DIR}/config/domains.conf"
 OUTPUT_FILE="${REPO_DIR}/config/caddy/Caddyfile"
 CONFIG_FILE="${REPO_DIR}/config.env"
+[ -f "$CONFIG_FILE" ] || CONFIG_FILE="${SCRIPT_DIR}/config.env"
 
 if [ ! -f "$DOMAINS_FILE" ]; then
     echo "ERROR: ${DOMAINS_FILE} not found"
@@ -65,8 +66,8 @@ LOG_BLOCK='    log {
 
     # ── Shop backend ─────────────────────────────────────
     if [ -n "${BACKEND_DOMAINS[shop]:-}" ]; then
-        # Trim trailing space and join with ", "
-        domains=$(echo "${BACKEND_DOMAINS[shop]}" | xargs | tr ' ' ', ')
+        # Trim trailing space, join with spaces (Caddy site block syntax)
+        domains=$(echo "${BACKEND_DOMAINS[shop]}" | xargs)
         echo "${domains} {"
         echo "${SECURITY_HEADERS}"
         echo ""
@@ -83,7 +84,7 @@ LOG_BLOCK='    log {
 
     # ── Website backend ──────────────────────────────────
     if [ -n "${BACKEND_DOMAINS[website]:-}" ]; then
-        domains=$(echo "${BACKEND_DOMAINS[website]}" | xargs | tr ' ' ', ')
+        domains=$(echo "${BACKEND_DOMAINS[website]}" | xargs)
         echo "${domains} {"
         echo "${SECURITY_HEADERS}"
         echo ""
@@ -98,7 +99,7 @@ LOG_BLOCK='    log {
 
     # ── Mailweb backend ──────────────────────────────────
     if [ -n "${BACKEND_DOMAINS[mailweb]:-}" ]; then
-        domains=$(echo "${BACKEND_DOMAINS[mailweb]}" | xargs | tr ' ' ', ')
+        domains=$(echo "${BACKEND_DOMAINS[mailweb]}" | xargs)
         echo "${domains} {"
         echo "${SECURITY_HEADERS}"
         echo ""
@@ -113,7 +114,7 @@ LOG_BLOCK='    log {
 
     # ── Matomo shop backend ──────────────────────────────
     if [ -n "${BACKEND_DOMAINS[matomo-shop]:-}" ]; then
-        domains=$(echo "${BACKEND_DOMAINS[matomo-shop]}" | xargs | tr ' ' ', ')
+        domains=$(echo "${BACKEND_DOMAINS[matomo-shop]}" | xargs)
         echo "${domains} {"
         echo "${SECURITY_HEADERS}"
         echo ""
@@ -128,7 +129,7 @@ LOG_BLOCK='    log {
 
     # ── Matomo web backend ───────────────────────────────
     if [ -n "${BACKEND_DOMAINS[matomo-web]:-}" ]; then
-        domains=$(echo "${BACKEND_DOMAINS[matomo-web]}" | xargs | tr ' ' ', ')
+        domains=$(echo "${BACKEND_DOMAINS[matomo-web]}" | xargs)
         echo "${domains} {"
         echo "${SECURITY_HEADERS}"
         echo ""
@@ -145,7 +146,7 @@ LOG_BLOCK='    log {
     for key in "${!BACKEND_DOMAINS[@]}"; do
         [[ "$key" == redirect:* ]] || continue
         target="${key#redirect:}"
-        domains=$(echo "${BACKEND_DOMAINS[$key]}" | xargs | tr ' ' ', ')
+        domains=$(echo "${BACKEND_DOMAINS[$key]}" | xargs)
         echo "${domains} {"
         echo "    redir https://${target}{uri} permanent"
         echo "}"
