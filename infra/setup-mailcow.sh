@@ -19,7 +19,7 @@ MAIL_DOMAINS_FILE="${INSTALL_DIR}/config/mail-domains.conf"
 log_info "=== Setting up Mailcow ==="
 
 # ── Clone Mailcow ───────────────────────────────────────
-if [ -d "${MAILCOW_DIR}/docker-compose.yml" ] || [ -d "${MAILCOW_DIR}/compose.yaml" ]; then
+if [ -f "${MAILCOW_DIR}/docker-compose.yml" ] || [ -f "${MAILCOW_DIR}/compose.yaml" ]; then
     log_info "Mailcow already cloned at ${MAILCOW_DIR}, updating..."
     cd "${MAILCOW_DIR}"
     git pull || log_warn "Git pull failed — continuing with existing version"
