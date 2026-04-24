@@ -33,3 +33,10 @@ web/app/plugins/
 .vscode/
 *.swp
 *.bak
+
+# Deploy-time runtime artifacts
+.restore-done
+website/
+
+# StorageBox SSH key (per CLAUDE.md — must stay git-ignored)
+config/backup/backup_key
