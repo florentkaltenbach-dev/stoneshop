@@ -107,18 +107,6 @@ function smg_enqueue_assets() {
         );
     }
 
-    // Variant switcher JavaScript (for admins/testers)
-    $variant_js = get_template_directory() . '/assets/js/variant-switcher.js';
-    if (smg_variant_switching_allowed() && file_exists($variant_js)) {
-        wp_enqueue_script(
-            'smg-variant-switcher',
-            get_template_directory_uri() . '/assets/js/variant-switcher.js',
-            [],
-            filemtime($variant_js),
-            true
-        );
-    }
-
     // Index drawer for primary navigation access
     $drawer_js = get_template_directory() . '/assets/js/index-drawer.js';
     if (file_exists($drawer_js)) {
@@ -247,11 +235,10 @@ function smg_render_index_drawer() {
                         name="s"
                     />
                     <input type="hidden" name="post_type" value="product" />
-                    <?php smg_variant_hidden_field(); ?>
                 </div>
             </form>
 
-            <a class="index-drawer__collections" href="<?php echo esc_url(smg_url_with_variant($collections_url)); ?>">
+            <a class="index-drawer__collections" href="<?php echo esc_url($collections_url); ?>">
                 <?php esc_html_e('Themen', 'steine-mit-geschichte'); ?>
             </a>
 
@@ -566,264 +553,6 @@ add_filter('woocommerce_taxonomy_args_product_tag', function ($args) {
     return $args;
 });
 
-/* ==========================================================================
-   Variation Framework
-   Lightweight A/B testing without forking templates
-   ========================================================================== */
-
-/**
- * Get the currently active variant
- *
- * Priority:
- * 1. Query parameter ?variant=... (if allowed)
- * 2. SMG_VARIATION constant
- * 3. Default: 'v0' (baseline)
- *
- * @return string The active variant slug (e.g., 'v0', 'v1-dense-grid')
- */
-function smg_variant() {
-    static $variant = null;
-
-    if ($variant !== null) {
-        return $variant;
-    }
-
-    // Default baseline
-    $variant = 'v0';
-
-    // Check constant first
-    if (defined('SMG_VARIATION') && SMG_VARIATION) {
-        $variant = sanitize_key(SMG_VARIATION);
-    }
-
-    // Query parameter can override (with safety checks)
-    if (smg_variant_switching_allowed() && isset($_GET['variant'])) {
-        $requested = sanitize_key($_GET['variant']);
-        if (smg_is_valid_variant($requested)) {
-            $variant = $requested;
-        }
-    }
-
-    return $variant;
-}
-
-/**
- * Check if a specific variant is active
- *
- * @param string $variant_slug The variant to check (e.g., 'v1-dense-grid')
- * @return bool True if this variant is currently active
- */
-function smg_is_variant($variant_slug) {
-    return smg_variant() === sanitize_key($variant_slug);
-}
-
-/**
- * Check if any of the given variants is active
- *
- * @param array $variants Array of variant slugs to check
- * @return bool True if any of the variants is active
- */
-function smg_is_any_variant($variants) {
-    $current = smg_variant();
-    foreach ($variants as $v) {
-        if ($current === sanitize_key($v)) {
-            return true;
-        }
-    }
-    return false;
-}
-
-/**
- * Get CSS class string for current variant
- * Useful for adding to body or container elements
- *
- * @param string $prefix Optional prefix for the class (default: 'variant')
- * @return string CSS class like 'variant-v0' or 'variant-v1-dense-grid'
- */
-function smg_variant_class($prefix = 'variant') {
-    return esc_attr($prefix . '-' . smg_variant());
-}
-
-/**
- * Output variant-specific content
- * Helper for inline conditional content in templates
- *
- * @param string $variant_slug The variant this content is for
- * @param callable $callback Function that outputs the content
- */
-function smg_for_variant($variant_slug, $callback) {
-    if (smg_is_variant($variant_slug) && is_callable($callback)) {
-        $callback();
-    }
-}
-
-/**
- * Output content for baseline only (not any variant)
- *
- * @param callable $callback Function that outputs the content
- */
-function smg_for_baseline($callback) {
-    if (smg_is_variant('v0') && is_callable($callback)) {
-        $callback();
-    }
-}
-
-/**
- * Check if variant switching via URL is allowed
- *
- * Safety rules:
- * - Always allowed in development/staging environments
- * - In production: only for logged-in admins
- *
- * @return bool
- */
-function smg_variant_switching_allowed() {
-    // Allow if not in production
-    if (defined('WP_ENV') && WP_ENV !== 'production') {
-        return true;
-    }
-
-    // Allow if WP_DEBUG is enabled (development mode)
-    if (defined('WP_DEBUG') && WP_DEBUG) {
-        return true;
-    }
-
-    // Allow if SMG_ALLOW_VARIANT_SWITCHING is explicitly set
-    if (defined('SMG_ALLOW_VARIANT_SWITCHING') && SMG_ALLOW_VARIANT_SWITCHING) {
-        return true;
-    }
-
-    // In production: only for logged-in administrators
-    if (is_user_logged_in() && current_user_can('manage_options')) {
-        return true;
-    }
-
-    return false;
-}
-
-/**
- * Validate that a variant slug is registered/known
- * This prevents arbitrary values being injected
- *
- * @param string $variant_slug The variant to validate
- * @return bool True if this is a known variant
- */
-function smg_is_valid_variant($variant_slug) {
-    $registered = smg_get_registered_variants();
-    return isset($registered[$variant_slug]);
-}
-
-/**
- * Get all registered variants
- * Central registry of valid variant slugs
- *
- * @return array Associative array of variant_slug => description
- */
-function smg_get_registered_variants() {
-    return apply_filters('smg_registered_variants', [
-        'v0' => 'Kontakt: Minimal',
-        'v1' => 'Kontakt: Zweispaltig',
-        'v2' => 'Kontakt: Panel',
-        'v3' => 'Kontakt: Reserved',
-        'v4' => 'Kontakt: Reserved',
-        'v5' => 'Kontakt: Reserved',
-    ]);
-}
-
-/**
- * Add variant class to body
- */
-function smg_variant_body_class($classes) {
-    $classes[] = smg_variant_class();
-
-    return $classes;
-}
-add_filter('body_class', 'smg_variant_body_class');
-
-/**
- * Add variant indicator for admins
- * Shows which variant is active in the admin bar
- */
-function smg_admin_bar_variant_indicator($wp_admin_bar) {
-    if (!smg_variant_switching_allowed()) {
-        return;
-    }
-
-    $current = smg_variant();
-    $variants = smg_get_registered_variants();
-
-    // Parent menu item
-    $wp_admin_bar->add_node([
-        'id'    => 'smg-variant',
-        'title' => 'Variant: ' . esc_html($current),
-        'href'  => '#',
-        'meta'  => [
-            'title' => 'Current design variant',
-        ],
-    ]);
-
-    // Sub-items for each variant
-    foreach ($variants as $slug => $description) {
-        $url = add_query_arg('variant', $slug);
-
-        $wp_admin_bar->add_node([
-            'parent' => 'smg-variant',
-            'id'     => 'smg-variant-' . $slug,
-            'title'  => ($slug === $current ? '● ' : '○ ') . esc_html($slug) . ' - ' . esc_html($description),
-            'href'   => esc_url($url),
-        ]);
-    }
-}
-add_action('admin_bar_menu', 'smg_admin_bar_variant_indicator', 100);
-
-/**
- * Preserve variant parameter in pagination and other links
- */
-function smg_preserve_variant_in_links($link) {
-    if (!smg_variant_switching_allowed()) {
-        return $link;
-    }
-
-    if (isset($_GET['variant']) && smg_is_valid_variant($_GET['variant'])) {
-        $link = add_query_arg('variant', sanitize_key($_GET['variant']), $link);
-    }
-
-    return $link;
-}
-add_filter('paginate_links', 'smg_preserve_variant_in_links');
-add_filter('post_type_link', 'smg_preserve_variant_in_links', 10, 1);
-add_filter('term_link', 'smg_preserve_variant_in_links', 10, 1);
-add_filter('woocommerce_pagination_args', function($args) {
-    if (smg_variant_switching_allowed() && isset($_GET['variant'])) {
-        $args['add_args'] = ['variant' => sanitize_key($_GET['variant'])];
-    }
-    return $args;
-});
-
-/**
- * Append current variant to arbitrary URLs (manual links, buttons).
- */
-function smg_url_with_variant(string $url): string {
-    if (!smg_variant_switching_allowed()) {
-        return $url;
-    }
-
-    if (isset($_GET['variant']) && smg_is_valid_variant($_GET['variant'])) {
-        return add_query_arg('variant', sanitize_key($_GET['variant']), $url);
-    }
-
-    return $url;
-}
-
-/**
- * Output a hidden input for the current variant (search/forms).
- */
-function smg_variant_hidden_field(): void {
-    if (smg_variant_switching_allowed() && isset($_GET['variant']) && smg_is_valid_variant($_GET['variant'])) {
-        echo '<input type="hidden" name="variant" value="' . esc_attr(sanitize_key($_GET['variant'])) . '" />';
-    }
-}
-
 /**
  * Get a representative image ID for a collection term.
  * Prefers the WooCommerce term thumbnail; falls back to first product image.
@@ -934,7 +663,7 @@ function smg_render_product_tag_list(): void {
     echo '<ul class="smg-tag-list">';
     foreach ($tags as $tag) {
         $count = isset($tag->count) ? (int) $tag->count : 0;
-        $url = smg_url_with_variant(get_term_link($tag));
+        $url = get_term_link($tag);
         echo '<li class="smg-tag-list__item">';
         echo '<a class="smg-tag-list__link" href="' . esc_url($url) . '">';
         echo '<span class="smg-tag-list__name">' . esc_html($tag->name) . '</span>';
@@ -981,7 +710,7 @@ function smg_render_product_category_tree(int $parent = 0, int $depth = 0): void
     echo '<ul class="smg-category-tree smg-category-tree--level-' . (int) $depth . '">';
     foreach ($terms as $term) {
         $count = isset($term->count) ? (int) $term->count : 0;
-        $url = smg_url_with_variant(get_term_link($term));
+        $url = get_term_link($term);
         echo '<li class="smg-category-tree__item">';
         echo '<a class="smg-category-tree__link" href="' . esc_url($url) . '">';
         echo '<span class="smg-category-tree__name">' . esc_html($term->name) . '</span>';
@@ -991,106 +720,4 @@ function smg_render_product_category_tree(int $parent = 0, int $depth = 0): void
         echo '</li>';
     }
     echo '</ul>';
-}
-
-
-/* ==========================================================================
-   Variant-Specific Functionality
-   ========================================================================== */
-
-/**
- * V1 Soft Commerce: Re-enable price and add-to-cart on single product
- * These are displayed in a secondary "Acquire" section
- */
-function smg_v1_enable_commerce() {
-    if (!smg_is_variant('v1')) {
-        return;
-    }
-
-    // We'll handle the display in the template, but we need the price available
-    // Don't remove the price action for V1
-}
-
-/**
- * V1 Soft Commerce: Check if cart has items (for conditional cart icon)
- */
-function smg_cart_has_items() {
-    if (function_exists('WC') && WC()->cart) {
-        return WC()->cart->get_cart_contents_count() > 0;
-    }
-    return false;
-}
-
-/**
- * V1 Soft Commerce: Add body class when cart has items
- */
-function smg_v1_cart_body_class($classes) {
-    if (smg_is_variant('v1') && smg_cart_has_items()) {
-        $classes[] = 'cart-has-items';
-    }
-    return $classes;
-}
-add_filter('body_class', 'smg_v1_cart_body_class');
-
-/**
- * V2 Physical Presence: Reduce products per page
- */
-function smg_v2_products_per_page($per_page) {
-    if (smg_is_variant('v2')) {
-        return 8; // Fewer items, larger presence
-    }
-    return $per_page;
-}
-add_filter('loop_shop_per_page', 'smg_v2_products_per_page', 20);
-
-/**
- * V2 Physical Presence: Add larger image size
- */
-function smg_v2_image_size() {
-    if (smg_is_variant('v2')) {
-        add_image_size('object-xlarge', 600, 600, false);
-    }
-}
-add_action('after_setup_theme', 'smg_v2_image_size');
-
-/**
- * All variants: Rename "Related products" to "Related stones in this collection"
- * This is handled in the template, but we ensure the default WC related products are suppressed
- */
-function smg_related_stones_title() {
-    return __('Verwandte Steine in dieser Sammlung', 'steine-mit-geschichte');
-}
-
-/**
- * Helper: Check if we should show the Acquire section (V1 only)
- */
-function smg_show_acquire_section() {
-    return smg_is_variant('v1');
-}
-
-/**
- * Helper: Get price display for V1 Acquire section
- */
-function smg_get_acquire_price($product) {
-    if (!$product || !smg_is_variant('v1')) {
-        return '';
-    }
-
-    $price = $product->get_price();
-    if (empty($price) || $price == 0) {
-        return __('Price on request', 'steine-mit-geschichte');
-    }
-
-    return $product->get_price_html();
-}
-
-/**
- * V3 Curatorial Voice: Helper to check if collection has substantial intro
- */
-function smg_collection_has_intro() {
-    if (!is_product_category()) {
-        return false;
-    }
-    $term = get_queried_object();
-    return !empty($term->description) && strlen($term->description) > 50;
 }

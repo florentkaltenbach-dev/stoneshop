@@ -83,7 +83,6 @@ Config::define('AUTOMATIC_UPDATER_DISABLED', true);
 Config::define('DISABLE_WP_CRON', env('DISABLE_WP_CRON') ?: false);
 Config::define('DISALLOW_FILE_EDIT', true);
 Config::define('DISALLOW_FILE_MODS', env('DISALLOW_FILE_MODS') ?: false);
-Config::define('SMG_VARIATION', env('SMG_VARIATION') ?: 'v5');
 
 /**
  * Debugging Settings

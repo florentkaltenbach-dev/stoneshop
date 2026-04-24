@@ -6,11 +6,6 @@
  * - Collections Index (Shop)
  * - Collection page (product category)
  * - Stone detail (single product)
- *
- * Variants:
- * - v1: Soft Commerce (Acquire section on stone detail)
- * - v2: More Physical Object Presence (bigger objects, fewer per page; used via CSS/classes)
- * - v3: Stronger Curatorial Voice (intro prominence/placement)
  */
 
 defined('ABSPATH') || exit;
@@ -46,7 +41,7 @@ function smg_render_collections_index(): void {
         'exclude'    => [$default_category_id],
     ]);
     ?>
-    <div class="smg-page collections-index <?php echo smg_variant_class(); ?>">
+    <div class="smg-page collections-index">
         <div class="container-mid">
             <?php smg_breadcrumbs(); ?>
         </div>
@@ -80,7 +75,7 @@ function smg_render_collections_index(): void {
                                     <?php foreach ($child_categories as $child_category) : ?>
                                         <?php
                                         $child_count = isset($child_category->count) ? (int) $child_category->count : 0;
-                                        $child_url = smg_url_with_variant(get_term_link($child_category));
+                                        $child_url = get_term_link($child_category);
                                         ?>
                                         <li class="collection-card__children-item">
                                             <a class="collection-card__children-link" href="<?php echo esc_url($child_url); ?>">
@@ -124,7 +119,7 @@ function smg_render_tags_index(): void {
         'hide_empty' => true,
     ]);
     ?>
-    <div class="smg-page tags-index <?php echo smg_variant_class(); ?>">
+    <div class="smg-page tags-index">
         <div class="container-mid">
             <?php smg_breadcrumbs(); ?>
         </div>
@@ -159,7 +154,7 @@ function smg_render_tags_index(): void {
  * Render: a tag card on /shop (tags index)
  */
 function smg_render_tag_card(WP_Term $term): void {
-    $url   = smg_url_with_variant(get_term_link($term));
+    $url   = get_term_link($term);
     $count = isset($term->count) ? (int) $term->count : 0;
 
     $image_id = smg_get_tag_image_id((int) $term->term_id);
@@ -207,7 +202,7 @@ function smg_render_tag_archive(): void {
     $term = get_queried_object();
     $has_intro = ($term instanceof WP_Term) && !empty($term->description);
     ?>
-    <div class="smg-page tag-archive <?php echo smg_variant_class(); ?>">
+    <div class="smg-page tag-archive">
         <div class="container-mid">
             <?php smg_breadcrumbs(); ?>
         </div>
@@ -264,27 +259,17 @@ function smg_render_tag_archive(): void {
 function smg_render_collection_page(): void {
     $term = is_product_category() ? get_queried_object() : null;
     $has_intro = ($term instanceof WP_Term) && !empty($term->description);
-
-    $emphasize_intro = smg_is_variant('v3') && $has_intro;
     ?>
-    <div class="smg-page collection-page <?php echo smg_variant_class(); ?>">
+    <div class="smg-page collection-page">
         <div class="container-mid">
             <?php smg_breadcrumbs(); ?>
         </div>
-
-        <?php if ($emphasize_intro) : ?>
-            <div class="collection-curatorial container-mid">
-                <div class="collection-curatorial__intro">
-                    <?php echo wp_kses_post(wpautop($term->description)); ?>
-                </div>
-            </div>
-        <?php endif; ?>
 
         <header class="collection-header container-mid">
             <?php if ($term instanceof WP_Term) : ?>
                 <h1 class="collection-title"><?php echo esc_html($term->name); ?></h1>
 
-                <?php if ($has_intro && !$emphasize_intro) : ?>
+                <?php if ($has_intro) : ?>
                     <div class="collection-intro">
                         <?php echo wp_kses_post(wpautop($term->description)); ?>
                     </div>
@@ -330,7 +315,7 @@ function smg_render_collection_page(): void {
  * Render: a collection card on /shop (collections index)
  */
 function smg_render_collection_card(WP_Term $term): void {
-    $url   = smg_url_with_variant(get_term_link($term));
+    $url   = get_term_link($term);
     $count = isset($term->count) ? (int) $term->count : 0;
 
     // Category thumbnail (with product fallback)
@@ -450,7 +435,7 @@ function smg_render_stone_detail(WC_Product $product): void {
         $dimension_parts[] = 'H ' . wc_format_localized_decimal($height_raw);
     }
     ?>
-    <div class="smg-page stone-detail <?php echo smg_variant_class(); ?>">
+    <div class="smg-page stone-detail">
         <div class="container-mid">
             <?php smg_breadcrumbs(); ?>
         </div>
@@ -602,7 +587,7 @@ function smg_render_stone_detail(WC_Product $product): void {
         if ($primary_tag instanceof WP_Term) :
             $related_args = [
                 'post_type'      => 'product',
-                'posts_per_page' => smg_is_variant('v2') ? 3 : 4,
+                'posts_per_page' => 4,
                 'post__not_in'   => [$product->get_id()],
                 'tax_query'      => [
                     [
