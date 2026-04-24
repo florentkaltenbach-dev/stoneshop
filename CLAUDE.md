@@ -16,6 +16,7 @@ See `docs/migration/` for legacy migration docs.
 - **Three config files.** Secrets in `config.env`, web routing in `config/domains.conf`, mail domains in `config/mail-domains.conf`.
 - **Idempotent scripts.** Every script in `infra/` must be safely re-runnable.
 - **No hardcoded domains.** Scripts read from config files, not inline strings.
+- **Regenerate Caddyfile after `domains.conf` changes.** Run `bash infra/generate-caddyfile.sh` and commit the output. Never hand-edit `config/caddy/Caddyfile`.
 - **No `steinmetz-mindelheim-shop.de`** anywhere in the implementation.
 
 ## Repo structure
