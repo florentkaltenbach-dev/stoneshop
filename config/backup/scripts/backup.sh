@@ -24,9 +24,14 @@ log() {
 
 load_env_var() {
     local key="$1"
+    local optional="${2:-required}"
     local value
     value="$(grep -m1 "^${key}=" config.env 2>/dev/null | cut -d= -f2- || true)"
     if [ -z "$value" ]; then
+        if [ "$optional" = "optional" ]; then
+            export "${key}="
+            return 0
+        fi
         log "ERROR - Missing ${key} in /opt/dockbase/config.env"
         exit 1
     fi
@@ -41,6 +46,20 @@ mode_includes() {
     esac
 }
 
+# Healthchecks.io heartbeat (no-op if URL is empty/missing).
+# /start at begin, bare URL on success, /fail with log-tail body on error.
+hc_ping() {
+    local suffix="${1:-}"
+    [ -z "${HEALTHCHECKS_BACKUP_URL:-}" ] && return 0
+    local url="${HEALTHCHECKS_BACKUP_URL}${suffix}"
+    if [ "$suffix" = "/fail" ] && [ -f "$LOG_FILE" ]; then
+        tail -c 8000 "$LOG_FILE" 2>/dev/null \
+            | curl -fsS -m 10 --retry 3 --data-binary @- "$url" >/dev/null 2>&1 || true
+    else
+        curl -fsS -m 10 --retry 3 -X POST "$url" >/dev/null 2>&1 || true
+    fi
+}
+
 mkdir -p logs
 
 # Prevent overlapping runs
@@ -50,13 +69,29 @@ if ! flock -n 200; then
     exit 0
 fi
 
-trap 'rc=$?; rm -rf "$TMP_BACKUP"; log "ERROR - Backup failed (line ${LINENO}, exit ${rc})"; exit $rc' ERR
-trap 'rm -rf "$TMP_BACKUP"' EXIT
-
 load_env_var MYSQL_ROOT_PASSWORD
 load_env_var RESTIC_REPOSITORY
 load_env_var RESTIC_PASSWORD
 load_env_var DEPLOY_MODE
+load_env_var HEALTHCHECKS_BACKUP_URL optional
+
+# Tracks completion state for the EXIT trap:
+#   ""     → signal-kill or early exit (no ERR, no normal end) → ping /fail
+#   "fail" → ERR fired (already pinged /fail with body)        → no extra ping
+#   "1"    → normal success                                    → ping bare URL
+BACKUP_OK=
+
+trap 'rc=$?; rm -rf "$TMP_BACKUP"; log "ERROR - Backup failed (line ${LINENO}, exit ${rc})"; BACKUP_OK=fail; hc_ping /fail; exit $rc' ERR
+trap '
+  rm -rf "$TMP_BACKUP"
+  case "${BACKUP_OK:-}" in
+      1)    hc_ping "" ;;
+      fail) ;;
+      *)    hc_ping /fail ;;
+  esac
+' EXIT
+
+hc_ping /start
 
 # ── Healthcheck Gate ──────────────────────────────────────
 log "Waiting for healthy containers..."
@@ -137,16 +172,22 @@ if mode_includes mail; then
     MAILCOW_BACKUP_DIR="/opt/mailcow-backup"
 
     if [ -d "$MAILCOW_DIR" ]; then
-        log "Running Mailcow backup..."
-        mkdir -p "$MAILCOW_BACKUP_DIR"
+        # Precondition: target dir must exist and be writable by deploy.
+        # setup-mailcow.sh creates it (deploy:deploy 0755). Fail fast otherwise
+        # so the operator notices instead of silently snapshotting nothing.
+        if [ ! -d "$MAILCOW_BACKUP_DIR" ] || [ ! -w "$MAILCOW_BACKUP_DIR" ]; then
+            log "ERROR - ${MAILCOW_BACKUP_DIR} missing or not writable by $(id -un); rerun infra/setup-mailcow.sh"
+            exit 1
+        fi
+
+        log "Running Mailcow backup via helper-scripts..."
         cd "$MAILCOW_DIR"
-        # Use Mailcow's own backup tooling
-        MAILCOW_BACKUP_LOCATION="$MAILCOW_BACKUP_DIR" docker compose exec -T mailcowdockerized_backup_1 \
-            /opt/backup_and_restore.sh backup all 2>> "$LOG_FILE" || {
-            # Fallback: use the helper script directly
+        # No `mailcowdockerized_backup_1` service exists; call the helper script
+        # directly. Drop --delete-days 0 (it deleted prior on-disk backups
+        # before restic could snapshot them).
+        MAILCOW_BACKUP_LOCATION="$MAILCOW_BACKUP_DIR" \
             bash "${MAILCOW_DIR}/helper-scripts/backup_and_restore.sh" backup all \
-                --delete-days 0 2>> "$LOG_FILE" || log "Warning - Mailcow backup may have failed"
-        }
+            >> "$LOG_FILE" 2>&1
         cd /opt/dockbase
 
         log "Snapshotting Mailcow backup to Restic..."
@@ -164,3 +205,5 @@ restic --retry-lock 5m forget --keep-daily 7 --keep-weekly 4 --keep-monthly 6 --
 
 log "Backup completed successfully (mode: ${DEPLOY_MODE})"
 echo "---" >> "$LOG_FILE"
+BACKUP_OK=1
+# EXIT trap will emit the success heartbeat (bare URL).

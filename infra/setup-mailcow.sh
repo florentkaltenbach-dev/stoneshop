@@ -14,9 +14,17 @@ load_config
 require_var MAIL_HOSTNAME
 
 MAILCOW_DIR="/opt/mailcow"
+MAILCOW_BACKUP_DIR="/opt/mailcow-backup"
 MAIL_DOMAINS_FILE="${INSTALL_DIR}/config/mail-domains.conf"
 
 log_info "=== Setting up Mailcow ==="
+
+# ── Pre-create the Mailcow backup target dir as deploy:deploy 0755 ──
+# /opt is root:root 0755, so the deploy-owned backup.sh cannot mkdir
+# /opt/mailcow-backup at runtime. Create it here (root context) and chown.
+# Idempotent: install -d is a no-op if the dir already exists with the same mode.
+install -d -o deploy -g deploy -m 0755 "${MAILCOW_BACKUP_DIR}"
+log_info "Ensured ${MAILCOW_BACKUP_DIR} exists (deploy:deploy 0755)."
 
 # ── Clone Mailcow ───────────────────────────────────────
 if [ -f "${MAILCOW_DIR}/docker-compose.yml" ] || [ -f "${MAILCOW_DIR}/compose.yaml" ]; then
