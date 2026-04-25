@@ -18,6 +18,7 @@ cd "${INSTALL_DIR}"
 # ── Ensure directories exist ────────────────────────────
 mkdir -p "${INSTALL_DIR}/logs/frankenphp"
 chown deploy:dockbase "${INSTALL_DIR}/logs/frankenphp"
+chmod 2775 "${INSTALL_DIR}/logs/frankenphp"
 
 mkdir -p "${INSTALL_DIR}/web/app/uploads" "${INSTALL_DIR}/web/app/languages"
 chown -R 33:1100 "${INSTALL_DIR}/web/app/uploads" "${INSTALL_DIR}/web/app/languages"

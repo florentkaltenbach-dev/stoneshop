@@ -104,7 +104,7 @@ find "$INSTALL_DIR" -type d -exec chmod g+s {} +
 
 mkdir -p "$INSTALL_DIR/logs" "$INSTALL_DIR/logs/frankenphp"
 chown -R deploy:dockbase "$INSTALL_DIR/logs"
-chmod 2775 "$INSTALL_DIR/logs"
+chmod 2775 "$INSTALL_DIR/logs" "$INSTALL_DIR/logs/frankenphp"
 
 mkdir -p "$INSTALL_DIR/backups/db" "$INSTALL_DIR/backups/uploads"
 chown -R deploy:project "$INSTALL_DIR/backups"
