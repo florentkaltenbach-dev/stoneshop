@@ -2,6 +2,46 @@
 
 Format: date, decision, reasoning, status.
 
+## 2026-04-25: Remove the `plugins` named volume
+
+**Decision:** Remove `plugins:/app/web/app/plugins` mount and the top-level
+`plugins:` volume from docker-compose.yml. Plugins are baked into the image
+via `composer install` at build time and owned by www-data through a single
+`chown -R www-data:www-data /app/web` line in the Dockerfile.
+**Reasoning:** Audit on 2026-04-25 confirmed all 11 wpackagist-plugin entries
+match composer.lock byte-for-byte, no runtime writes in the volume (0 files
+newer than the volume root), and composer.json/composer.lock mtimes equal.
+The volume only hid drift and complicated rollback. Build dry-run
+(--no-cache) measured 3m11s with 6.1s composer install and 0.4s chown, so
+the maintenance-window cost is well under the single-hour 13:00 UTC trough.
+wp-update.sh is intentionally untouched here — silent failure inside it is
+no worse than today, and a proper update pipeline is deferred to a follow-
+up project gated on the monitoring stack.
+**Status:** Staged on branch `issue-3-plugins-volume-removal`; merge during
+maintenance window 2026-04-29 13:00 UTC.
+
+**Migration sequence (from /opt/dockbase as deploy):**
+
+    git checkout main && git pull --ff-only
+    docker compose down
+    docker volume rm dockbase_plugins
+    docker compose build
+    docker compose up -d
+    sleep 30 && docker compose ps
+    curl -fsS -o /dev/null -w '%{http_code}\n' "https://${SITE_DOMAIN}/"
+
+Expect: all services Up (healthy), HTTP 200. Mailcow is a separate compose
+project at /opt/mailcow and is unaffected.
+
+**Rollback (if smoke fails) — primary path is the tarball, deterministic:**
+
+    docker compose down
+    docker load -i /home/deploy/rollback-pre-issue3-2026-04-25.tar
+    docker compose up -d
+
+Tarball: 374 MB, sha256
+7296bcb734efa4d6eb8eac92e5c8bdbd5cf081a1f7e0bdb96d093b53e4668862.
+
 ## 2026-03-17: Clean fixes only
 
 **Decision:** All infrastructure problems are fixed properly, no workarounds.
@@ -12,7 +52,7 @@ Format: date, decision, reasoning, status.
 
 **Decision:** WP-Piwik, Google Listings & Ads, Pinterest for WooCommerce, TikTok for Business, WooCommerce PayPal, and WooCommerce Services must be added to composer.json.
 **Reasoning:** These plugins lived only in a Docker named volume. A fresh `docker compose build` would lose them. Composer management makes them reproducible.
-**Status:** In progress (agent working on old server)
+**Status:** Resolved 2026-04-25 (see 2026-04-25 entry above; volume removal closes the loop).
 
 ## 2026-03-17: Full Matomo migration
 

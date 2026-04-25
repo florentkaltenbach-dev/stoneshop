@@ -32,18 +32,13 @@ RUN composer install --no-dev --optimize-autoloader --no-scripts
 COPY config/ config/
 COPY web/ web/
 
-# Ensure writable directories exist and are owned by www-data
+# Ensure writable runtime dirs exist; chown the entire web tree so www-data
+# can write WP core, plugins, and themes (plugins are now in the image, not
+# in a named volume — see DECISIONS.md 2026-04-25).
 RUN mkdir -p /app/web/app/uploads /app/web/app/wflogs \
              /app/web/app/upgrade /app/web/app/upgrade-temp-backup \
              /app/web/app/languages \
-    && chown -R www-data:www-data \
-         /data/caddy /config/caddy \
-         /app/web/app/uploads \
-         /app/web/app/wflogs \
-         /app/web/app/mu-plugins \
-         /app/web/app/upgrade \
-         /app/web/app/upgrade-temp-backup \
-         /app/web/app/languages \
+    && chown -R www-data:www-data /data/caddy /config/caddy /app/web \
     && setcap -r /usr/local/bin/frankenphp
 
 # Document root for Caddy

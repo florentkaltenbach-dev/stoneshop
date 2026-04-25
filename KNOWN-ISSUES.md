@@ -2,21 +2,6 @@
 
 ## CRITICAL — Must fix before migration
 
-### 1. Six plugins not managed by Composer
-
-**Status:** In progress (agent working on old server)
-
-These plugins are active but not in composer.json. They live only in the Docker named volume and would be lost on a fresh build:
-
-- WP-Piwik (Matomo) 1.1.1
-- Google Listings & Ads 3.5.3
-- Pinterest for WooCommerce 1.4.25
-- TikTok for Business 1.3.8
-- WooCommerce PayPal Payments 3.4.1
-- WooCommerce Services 3.5.1
-
-**Fix:** Add all six to composer.json. Test that `docker compose build` produces a working image with all plugins present and active.
-
 ### 2. CrowdSec enrollment key location unknown
 
 **Status:** Not started
@@ -54,5 +39,17 @@ The old server may have custom Docker daemon configuration (log rotation, storag
 **Fix:** Check on old server. If custom config exists, replicate in setup.sh.
 
 ## RESOLVED
+
+### 1. Six plugins not managed by Composer (resolved 2026-04-25)
+
+All eleven wpackagist-plugin entries in composer.json (including the six
+previously volume-only plugins) now match composer.lock byte-for-byte. The
+`plugins:` named volume was removed from docker-compose.yml; plugins are
+baked into the image via `composer install` at build time. Audit results:
+0 files in the old volume newer than the volume root, mtime-equal
+composer.json/composer.lock, restic check 179 snapshots green.
+Migration executed in the 2026-04-29 13:00 UTC maintenance window.
+Rollback: /home/deploy/rollback-pre-issue3-2026-04-25.tar (374 MB,
+sha256 7296bcb7…4668862) and dockbase-frankenphp:latest in image cache.
 
 (Items move here when fixed, with date and resolution.)

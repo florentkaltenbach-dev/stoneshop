@@ -141,7 +141,6 @@ services:
       - ./web/app/mu-plugins:/app/web/app/mu-plugins
       - ./web/app/languages:/app/web/app/languages
       - ./web/app/uploads:/app/web/app/uploads
-      - plugins:/app/web/app/plugins
       - ./config/caddy/frankenphp.Caddyfile:/etc/caddy/Caddyfile:ro
       - ./config/php/wordfence.ini:/usr/local/etc/php/conf.d/wordfence.ini:ro
       - ./config/php/uploads.ini:/usr/local/etc/php/conf.d/uploads.ini:ro
@@ -183,4 +182,3 @@ volumes:
   keydb_data:
   matomo_shop_data:
   matomo_web_data:
-  plugins:
