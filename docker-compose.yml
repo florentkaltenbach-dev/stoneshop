@@ -155,7 +155,7 @@ services:
       # SMTP relay to Mailcow's submission port (587) on the host. Use the
       # mail hostname (not host.docker.internal) so TLS cert CN matches.
       # Mailcow runs in a separate compose project not on dockbase-proxy.
-      - "mail.fraefel.de:host-gateway"
+      - "mail.stoneshop.de:host-gateway"
       - "host.docker.internal:host-gateway"
     depends_on:
       mariadb:

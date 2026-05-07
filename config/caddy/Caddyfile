@@ -49,7 +49,7 @@ fraefel.de www.fraefel.de {
     }
 }
 
-mail.fraefel.de {
+mail.stoneshop.de mail.fraefel.de {
     header {
         Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
         X-Content-Type-Options "nosniff"
