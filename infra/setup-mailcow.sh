@@ -208,6 +208,29 @@ else
                 continue
             fi
 
+            # Alias line: @localpart  goto@domain (forwards to an existing mailbox)
+            if [ -n "$current_domain" ] && [[ "$line" =~ ^@ ]]; then
+                alias_local=$(echo "$line" | awk '{print $1}' | sed 's/^@//')
+                alias_goto=$(echo "$line" | awk '{print $2}')
+                [ -z "$alias_local" ] || [ -z "$alias_goto" ] && continue
+                alias_address="${alias_local}@${current_domain}"
+
+                log_info "  Adding alias: ${alias_address} -> ${alias_goto}"
+
+                http_code=$(curl -sS -o /dev/null -w "%{http_code}" \
+                    -X POST "${MAILCOW_API}/add/alias" \
+                    -H "${AUTH_HEADER}" \
+                    -H "Content-Type: application/json" \
+                    -d "{\"address\":\"${alias_address}\",\"goto\":\"${alias_goto}\",\"active\":\"1\",\"sogo_visible\":\"1\"}" 2>/dev/null || echo "000")
+
+                if [ "$http_code" = "200" ] || [ "$http_code" = "409" ]; then
+                    log_info "    OK: ${alias_address} -> ${alias_goto} (${http_code})"
+                else
+                    log_warn "    Unexpected response ${http_code} for alias ${alias_address}"
+                fi
+                continue
+            fi
+
             # Mailbox line: localpart  Display Name
             if [ -n "$current_domain" ]; then
                 local_part=$(echo "$line" | awk '{print $1}')
