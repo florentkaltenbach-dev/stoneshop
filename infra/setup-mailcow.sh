@@ -175,6 +175,14 @@ else
         > "$PASSWORDS_FILE"
         chmod 0600 "$PASSWORDS_FILE"
 
+        # Aliases declared in mail-domains.conf grant the goto mailbox
+        # send_as permission via Mailcow's sender_acl. Collected during
+        # parsing and applied per-mailbox at end of loop.
+        # NOTE: edit/mailbox replaces the full sender_acl list, so any
+        # ACL entries added manually in the Mailcow UI for these mailboxes
+        # will be reset to what mail-domains.conf implies.
+        declare -A ALIAS_ACL_GRANTS
+
         current_domain=""
         while IFS= read -r line; do
             # Skip blanks and comments
@@ -225,6 +233,8 @@ else
 
                 if [ "$http_code" = "200" ] || [ "$http_code" = "409" ]; then
                     log_info "    OK: ${alias_address} -> ${alias_goto} (${http_code})"
+                    # Track grant: goto mailbox should be allowed to send AS this alias.
+                    ALIAS_ACL_GRANTS[$alias_goto]+="${alias_address} "
                 else
                     log_warn "    Unexpected response ${http_code} for alias ${alias_address}"
                 fi
@@ -265,6 +275,26 @@ else
             log_info "Initial mailbox passwords saved to: ${PASSWORDS_FILE}"
             log_info "Change them on first login!"
         fi
+
+        # ── Apply sender_acl grants (mailbox can send AS its aliases) ──
+        for mbox in "${!ALIAS_ACL_GRANTS[@]}"; do
+            # Build JSON array of alias addresses for this mailbox.
+            acl_json=""
+            for alias in ${ALIAS_ACL_GRANTS[$mbox]}; do
+                [ -z "$acl_json" ] && acl_json="\"$alias\"" || acl_json="$acl_json,\"$alias\""
+            done
+            log_info "Granting sender_acl: ${mbox} can send as [${ALIAS_ACL_GRANTS[$mbox]% }]"
+            http_code=$(curl -sS -o /dev/null -w "%{http_code}" \
+                -X POST "${MAILCOW_API}/edit/mailbox" \
+                -H "${AUTH_HEADER}" \
+                -H "Content-Type: application/json" \
+                -d "{\"items\":[\"${mbox}\"],\"attr\":{\"sender_acl\":[${acl_json}]}}" 2>/dev/null || echo "000")
+            if [ "$http_code" = "200" ]; then
+                log_info "  sender_acl applied for ${mbox}"
+            else
+                log_warn "  sender_acl set returned ${http_code} for ${mbox}"
+            fi
+        done
     fi
 fi
 
