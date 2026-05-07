@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "bf71969e58c81208441920e8eb0edfd3",
+    "content-hash": "fe09f545899cc8462b4e340de8515034",
     "packages": [
         {
             "name": "composer/installers",
@@ -1042,6 +1042,24 @@
             "time": "2025-12-27T19:49:13+00:00"
         },
         {
+            "name": "wpackagist-plugin/fluent-smtp",
+            "version": "2.2.95",
+            "source": {
+                "type": "svn",
+                "url": "https://plugins.svn.wordpress.org/fluent-smtp/",
+                "reference": "tags/2.2.95"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://downloads.wordpress.org/plugin/fluent-smtp.2.2.95.zip"
+            },
+            "require": {
+                "composer/installers": "^1.0 || ^2.0"
+            },
+            "type": "wordpress-plugin",
+            "homepage": "https://wordpress.org/plugins/fluent-smtp/"
+        },
+        {
             "name": "wpackagist-plugin/google-listings-and-ads",
             "version": "3.5.3",
             "source": {
@@ -1150,6 +1168,24 @@
             "homepage": "https://wordpress.org/plugins/woocommerce/"
         },
         {
+            "name": "wpackagist-plugin/woocommerce-germanized",
+            "version": "3.20.7",
+            "source": {
+                "type": "svn",
+                "url": "https://plugins.svn.wordpress.org/woocommerce-germanized/",
+                "reference": "tags/3.20.7"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://downloads.wordpress.org/plugin/woocommerce-germanized.3.20.7.zip"
+            },
+            "require": {
+                "composer/installers": "^1.0 || ^2.0"
+            },
+            "type": "wordpress-plugin",
+            "homepage": "https://wordpress.org/plugins/woocommerce-germanized/"
+        },
+        {
             "name": "wpackagist-plugin/woocommerce-paypal-payments",
             "version": "3.4.1",
             "source": {
@@ -1166,6 +1202,24 @@
             },
             "type": "wordpress-plugin",
             "homepage": "https://wordpress.org/plugins/woocommerce-paypal-payments/"
+        },
+        {
+            "name": "wpackagist-plugin/woocommerce-pdf-invoices-packing-slips",
+            "version": "3.9.6",
+            "source": {
+                "type": "svn",
+                "url": "https://plugins.svn.wordpress.org/woocommerce-pdf-invoices-packing-slips/",
+                "reference": "tags/3.9.6"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://downloads.wordpress.org/plugin/woocommerce-pdf-invoices-packing-slips.3.9.6.zip"
+            },
+            "require": {
+                "composer/installers": "^1.0 || ^2.0"
+            },
+            "type": "wordpress-plugin",
+            "homepage": "https://wordpress.org/plugins/woocommerce-pdf-invoices-packing-slips/"
         },
         {
             "name": "wpackagist-plugin/woocommerce-services",
