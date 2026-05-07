@@ -23,6 +23,10 @@ Every secret needed for the deployment. Transfer status tracks migration progres
 | RESTIC_REPOSITORY | Restic repo path on StorageBox | Old server .env | ☐ Copy from old server |
 | RESTIC_PASSWORD | Restic encryption password | Old server .env | ☐ Copy from old server |
 | CROWDSEC_ENROLL_KEY | CrowdSec console enrollment | Old server (find location) | ☐ Extract from old server |
+| WP_SMTP_HOST | Mailcow submission hostname (TLS CN match) | mail.fraefel.de | ☐ Default in config.env.example |
+| WP_SMTP_USER | Real mailbox auth user (aliases can't auth) | info@stoneshop.de | ☐ Provisioned by setup-mailcow.sh |
+| WP_SMTP_PASS | Mailbox password | /opt/mailcow/initial-passwords.txt on server | ☐ Auto-pulled by setup helpers |
+| WP_SMTP_FROM_EMAIL | "From" address WC uses | bestellungen@stoneshop.de | ☐ Default in config.env.example |
 
 ## SSH keys
 
