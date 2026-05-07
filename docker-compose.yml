@@ -151,6 +151,10 @@ services:
     networks:
       - dockbase-proxy
       - backend
+    extra_hosts:
+      # FluentSMTP relays to Mailcow's submission port (587) on the host.
+      # Mailcow runs in a separate compose project not on dockbase-proxy.
+      - "host.docker.internal:host-gateway"
     depends_on:
       mariadb:
         condition: service_healthy
